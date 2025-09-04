@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <title>WebRTC Color Sender</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 2em;
+        }
+
+        #canvas {
+            border: 2px solid #333;
+            display: block;
+            margin-bottom: 1em;
+        }
+
+        button {
+            margin-right: 1em;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>WebRTC Cámara y Micro</h2>
+    <video id="localVideo" width="320" height="240" autoplay muted playsinline
+        style="border:2px solid #333; display:block; margin-bottom:1em;"></video>
+    <button id="sendBtn">Enviar cámara y micro por WebRTC</button>
+    <div id="status"></div>
+
+    <script>
+        const video = document.getElementById('localVideo');
+        const sendBtn = document.getElementById('sendBtn');
+        const statusDiv = document.getElementById('status');
+        let pc = null;
+
+        sendBtn.onclick = async () => {
+            sendBtn.disabled = true;
+            statusDiv.textContent = 'Solicitando cámara y micro...';
+            try {
+                // 1. Captura cámara y micro
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                video.srcObject = stream;
+                statusDiv.textContent = 'Cámara y micro capturados. Iniciando WebRTC...';
+
+                // 2. Crea el PeerConnection
+                pc = new RTCPeerConnection();
+                // 3. Añade los tracks de audio y vídeo
+                stream.getTracks().forEach(track => {
+                    pc.addTrack(track, stream);
+                });
+
+                // 4. Crea la oferta SDP
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                // 5. Envía la oferta al backend
+                const resp = await fetch('/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: offer.type,
+                        sdp: offer.sdp
+                    })
+                });
+                if (!resp.ok) {
+                    statusDiv.textContent = 'Error en señalización: ' + resp.status;
+                    return;
+                }
+                const answer = await resp.json();
+                await pc.setRemoteDescription(answer);
+                statusDiv.textContent = 'WebRTC conectado. Enviando cámara y micro.';
+            } catch (err) {
+                statusDiv.textContent = 'Error: ' + err;
+            }
+        };
+    </script>
+</body>
+
+</html>

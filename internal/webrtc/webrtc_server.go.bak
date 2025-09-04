@@ -1,0 +1,297 @@
+package webrtc
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os/exec"
+	"sync"
+	"time"
+
+	pionwebrtc "github.com/pion/webrtc/v3"
+)
+
+// startFFmpegJPEGBridge lanza FFmpeg, escribe paquetes RTP a su stdin y lee frames JPEG de su stdout.
+func startFFmpegJPEGBridge(onJPEGFrame func([]byte)) (func([]byte), error) {
+	cmd := exec.Command("ffmpeg",
+		"-protocol_whitelist", "file,pipe,udp,rtp",
+		"-f", "rtp",
+		"-i", "-",
+		"-f", "image2pipe",
+		"-vcodec", "mjpeg",
+		"-q:v", "2",
+		"-",
+	)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo obtener stdin de ffmpeg: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo obtener stdout de ffmpeg: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("no se pudo iniciar ffmpeg: %w", err)
+	}
+
+	go func() {
+		reader := bufio.NewReader(stdout)
+		for {
+			marker, err := reader.Peek(2)
+			if err != nil {
+				log.Println("[FFmpeg] Fin de stream o error:", err)
+				break
+			}
+			if marker[0] == 0xFF && marker[1] == 0xD8 { // SOI JPEG
+				var buf bytes.Buffer
+				for {
+					b, err := reader.ReadByte()
+					if err != nil {
+						break
+					}
+					buf.WriteByte(b)
+					n := buf.Len()
+					if n > 2 && buf.Bytes()[n-2] == 0xFF && buf.Bytes()[n-1] == 0xD9 {
+						break // EOI
+					}
+				}
+				onJPEGFrame(buf.Bytes())
+			} else {
+				_, _ = reader.ReadByte()
+			}
+		}
+	}()
+
+	writeRTP := func(pkt []byte) {
+		_, err := stdin.Write(pkt)
+		if err != nil {
+			log.Println("Error escribiendo paquete RTP a FFmpeg stdin:", err)
+		}
+	}
+	return writeRTP, nil
+}
+
+// Buffer global para el último frame JPEG recibido
+var (
+	lastJPEGFrame []byte
+	lastJPEGMutex sync.RWMutex
+)
+
+// StartWebRTCServer inicia un servidor HTTP con endpoint /stream para señalización WebRTC
+func StartWebRTCServer(port int) {
+	// Usar el puerto recibido como parámetro
+
+	// Servir archivos estáticos desde ./static
+	fs := http.FileServer(http.Dir("./static"))
+	http.Handle("/static/", http.StripPrefix("/static/", fs))
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Permitir scripts inline para desarrollo (relajar CSP)
+		w.Header().Set("Content-Security-Policy", "script-src 'self' 'unsafe-inline';")
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+			http.ServeFile(w, r, "./static/index.html")
+			return
+		}
+		// fallback: servir otros archivos estáticos si existen
+		fs.ServeHTTP(w, r)
+	})
+	http.HandleFunc("/stream", handleWebRTCStream)
+	http.HandleFunc("/watch", handleWatch)
+	addr := fmt.Sprintf(":%d", port)
+	log.Println("[WebRTC] Servidor escuchando en puerto", port, "(endpoints /, /stream, /watch)")
+	log.Fatal(http.ListenAndServe(addr, nil))
+}
+
+// handleWatch sirve el stream en el modo solicitado (mjpeg, rtsp, webrtc)
+func handleWatch(w http.ResponseWriter, r *http.Request) {
+	mode := r.URL.Query().Get("mode")
+	switch mode {
+	case "mjpeg", "":
+		serveMJPEG(w, r)
+	case "rtsp":
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("[RTSP] Endpoint en construcción. Aquí se servirá el stream como RTSP."))
+	case "webrtc":
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("[WebRTC] Endpoint en construcción. Aquí se servirá el stream como WebRTC."))
+	default:
+		http.Error(w, "Modo no soportado", http.StatusBadRequest)
+	}
+}
+
+// serveMJPEG sirve el último frame JPEG recibido como un stream MJPEG
+func serveMJPEG(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+	w.Header().Set("Cache-Control", "no-cache")
+	for {
+		lastJPEGMutex.RLock()
+		frame := lastJPEGFrame
+		lastJPEGMutex.RUnlock()
+		if frame != nil {
+			_, _ = fmt.Fprintf(w, "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", len(frame)) // Mantener fmt para salida HTTP
+			_, _ = w.Write(frame)
+			_, _ = w.Write([]byte("\r\n"))
+		}
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(33 * time.Millisecond) // ~30 FPS
+	}
+}
+
+// handleWebRTCStream gestiona la señalización WebRTC (SDP offer/answer)
+func handleWebRTCStream(w http.ResponseWriter, r *http.Request) {
+	// Permitir CORS
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Responder a preflight OPTIONS
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	log.Println("[WebRTC] Petición recibida en /stream")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Leer el SDP offer del body
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Println("[WebRTC] Error leyendo el body:", err)
+		http.Error(w, "Error leyendo el body", http.StatusBadRequest)
+		return
+	}
+	log.Printf("[WebRTC] Body recibido: %s\n", string(body))
+	defer r.Body.Close()
+
+	// Unmarshal SDP usando un struct auxiliar para aceptar 'type' en minúsculas
+	var rawSDP struct {
+		Type string `json:"type"`
+		SDP  string `json:"sdp"`
+	}
+
+	if err := json.Unmarshal(body, &rawSDP); err != nil {
+		log.Println("[WebRTC] SDP offer inválido:", err)
+		http.Error(w, "SDP offer inválido", http.StatusBadRequest)
+		return
+	}
+	log.Printf("[WebRTC] SDP offer struct (raw): %+v\n", rawSDP)
+
+	// Convertir el tipo a mayúsculas para pion/webrtc
+	var offer pionwebrtc.SessionDescription
+	offer.SDP = rawSDP.SDP
+
+	switch rawSDP.Type {
+	case "offer":
+		offer.Type = pionwebrtc.SDPTypeOffer
+	case "answer":
+		offer.Type = pionwebrtc.SDPTypeAnswer
+	default:
+		log.Println("[WebRTC] SDP offer: tipo desconocido:", rawSDP.Type)
+		http.Error(w, "SDP offer: tipo desconocido", http.StatusBadRequest)
+		return
+	}
+	log.Printf("[WebRTC] SDP offer struct (final): %+v\n", offer)
+	log.Println("[WebRTC] SDP offer recibido correctamente")
+
+	// Configuración básica de PeerConnection
+
+	mediaEngine := &pionwebrtc.MediaEngine{}
+	mediaEngine.RegisterDefaultCodecs()
+	// Forzar solo interfaz loopback para ICE
+	settingEngine := pionwebrtc.SettingEngine{}
+	settingEngine.SetInterfaceFilter(func(iface string) bool {
+		// Windows: "Loopback Pseudo-Interface 1", Linux/Mac: "lo"
+		return iface == "Loopback Pseudo-Interface 1" || iface == "lo"
+	})
+	api := pionwebrtc.NewAPI(
+		pionwebrtc.WithMediaEngine(mediaEngine),
+		pionwebrtc.WithSettingEngine(settingEngine),
+	)
+	peerConnection, err := api.NewPeerConnection(pionwebrtc.Configuration{})
+	if err != nil {
+		log.Println("[WebRTC] Error creando PeerConnection:", err)
+		http.Error(w, "Error creando PeerConnection: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Println("[WebRTC] PeerConnection creado OK (solo loopback)")
+	defer peerConnection.Close()
+
+	// Registrar handlers para los tracks entrantes
+	log.Println("[WebRTC] Registrando handler OnTrack...")
+	peerConnection.OnTrack(func(track *pionwebrtc.TrackRemote, receiver *pionwebrtc.RTPReceiver) {
+		log.Printf("[WebRTC] CALLBACK OnTrack ejecutado. Kind=%s, Codec=%s, ID=%s\n", track.Kind().String(), track.Codec().MimeType, track.ID())
+		if track.Kind() == pionwebrtc.RTPCodecTypeVideo {
+			log.Println("[WebRTC] Track de VIDEO recibido, inicializando FFmpeg JPEG bridge...")
+			writeRTP, err := startFFmpegJPEGBridge(func(jpeg []byte) {
+				log.Printf("[WebRTC] Frame JPEG recibido de FFmpeg. Tamaño: %d bytes\n", len(jpeg))
+				lastJPEGMutex.Lock()
+				lastJPEGFrame = jpeg
+				lastJPEGMutex.Unlock()
+			})
+			if err != nil {
+				log.Println("Error iniciando FFmpeg JPEG bridge:", err)
+				return
+			}
+			go func() {
+				for {
+					pkt, _, err := track.ReadRTP()
+					if err != nil {
+						log.Println("[WebRTC] Fin de track o error:", err)
+						return
+					}
+					raw, err := pkt.Marshal()
+					if err != nil {
+						log.Println("Error serializando paquete RTP:", err)
+						continue
+					}
+					log.Printf("[WebRTC] Paquete RTP recibido. Len=%d\n", len(pkt.Payload))
+					writeRTP(raw)
+				}
+			}()
+		} else {
+			log.Printf("[WebRTC] Track recibido NO es de vídeo (Kind=%s, Codec=%s, ID=%s)", track.Kind().String(), track.Codec().MimeType, track.ID())
+		}
+	})
+
+	// Setear el offer remoto
+	if err := peerConnection.SetRemoteDescription(offer); err != nil {
+		log.Println("[WebRTC] Error en SetRemoteDescription:", err)
+		http.Error(w, "Error en SetRemoteDescription: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Println("[WebRTC] SetRemoteDescription OK")
+
+	// Crear answer
+	answer, err := peerConnection.CreateAnswer(nil)
+	if err != nil {
+		log.Println("[WebRTC] Error creando answer:", err)
+		http.Error(w, "Error creando answer: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Println("[WebRTC] Answer creado OK")
+
+	// Setear el answer local
+	if err := peerConnection.SetLocalDescription(answer); err != nil {
+		log.Println("[WebRTC] Error en SetLocalDescription:", err)
+		http.Error(w, "Error en SetLocalDescription: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Println("[WebRTC] SetLocalDescription OK")
+
+	// Esperar a ICE gathering
+	<-pionwebrtc.GatheringCompletePromise(peerConnection)
+	log.Println("[WebRTC] SDP answer enviada al cliente")
+
+	// Devolver el SDP answer como JSON
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(peerConnection.LocalDescription())
+}
