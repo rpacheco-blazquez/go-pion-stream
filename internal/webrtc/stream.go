@@ -57,74 +57,57 @@ var isJPEGsaved = false // true: se ha guardado un JPEG manualmente
 var ffmpegMJPEGOnce sync.Once
 
 func HandleTrack(track *webrtc.TrackRemote, udpConns map[string]*udpConn) {
+	buf := make([]byte, 1500)
+	rtpPacket := &rtp.Packet{}
+
+	// Si es vídeo, arrancamos FFmpeg solo una vez
+	if track.Kind() == webrtc.RTPCodecTypeVideo {
+		ffmpegMJPEGOnce.Do(func() {
+			log.Println("[FFmpeg] Primer track de video, arrancando pipeline MJPEG...")
+			go func() {
+				err := RunFFmpegToMJPEG(func(frame []byte) {
+				// cada frame JPEG que genera FFmpeg se envía a todos los clientes MJPEG
+					broadcastFrame(frame)
+				})
+				if err != nil {
+					log.Printf("[FFmpeg] Error en pipeline MJPEG: %v", err)
+				}
+			}()
+		})
+	}
+
+	// Reenvío de RTP si quieres UDP
 	conn, ok := udpConns[track.Kind().String()]
 	if !ok {
 		return
 	}
-	buf := make([]byte, 1500)
-	rtpPacket := &rtp.Packet{}
-	// Solo lanzamos el pipeline MJPEG, ya no grabamos WebM
-	// Lanzar ffmpeg MJPEG solo una vez al recibir el primer track de vídeo
-	if track.Kind().String() == "video" {
-		ffmpegMJPEGOnce.Do(func() {
-			if FFMPEGWEBM {
-				go func() {
-					for {
-						timestamp := fmt.Sprintf("%d.webm", getTimestamp())
-						log.Printf("[FFmpeg] Lanzando grabación WebM: %s", timestamp)
-						err := RunFFmpegToMJPEG()
-						if err != nil {
-							log.Printf("[FFmpeg] Error WebM: %v", err)
-						}
-					}
-				}()
-			} else if isJPEGsaved {
-				go func() {
-					log.Println("[MJPEG] Guardando frame JPEG manual (blue/red) en bucle...")
-					for {
-						if err := RunFFmpegToMJPEG(); err != nil {
-							log.Printf("[MJPEG] Error guardando frame manual: %v", err)
-						}
-						time.Sleep(1 * time.Second)
-					}
-				}()
-			} else {
-				go func() {
-					log.Println("[FFmpeg] Lanzando MJPEG en directo desde HandleTrack...")
-					if err := RunFFmpegToMJPEG(); err != nil {
-						log.Printf("[FFmpeg] Error MJPEG: %v", err)
-					}
-				}()
-			}
-		})
-	}
+
 	for {
 		n, _, readErr := track.Read(buf)
 		if readErr != nil {
 			log.Printf("[OnTrack] Error leyendo track: %v", readErr)
 			return
 		}
+
 		if err := rtpPacket.Unmarshal(buf[:n]); err != nil {
 			log.Printf("[OnTrack] Error unmarshal RTP: %v", err)
 			return
 		}
+
 		rtpPacket.PayloadType = conn.payloadType
-		if n, err := rtpPacket.MarshalTo(buf); err != nil {
+		n, err := rtpPacket.MarshalTo(buf)
+		if err != nil {
 			log.Printf("[OnTrack] Error marshal RTP: %v", err)
 			return
-		} else {
-			if _, writeErr := conn.conn.Write(buf[:n]); writeErr != nil {
-				var opError *net.OpError
-				if errors.As(writeErr, &opError) && opError.Err.Error() == "write: connection refused" {
-					continue
-				}
-				log.Printf("[OnTrack] Error escribiendo UDP: %v", writeErr)
-				return
-			} else {
-				if track.Kind().String() == "video" {
-					log.Printf("[OnTrack] Paquete RTP de video enviado a UDP puerto %d, tamaño %d bytes", conn.port, n)
-				}
+		}
+
+		if _, writeErr := conn.conn.Write(buf[:n]); writeErr != nil {
+			var opError *net.OpError
+			if errors.As(writeErr, &opError) && opError.Err.Error() == "write: connection refused" {
+				continue
 			}
+			log.Printf("[OnTrack] Error escribiendo UDP: %v", writeErr)
+			return
 		}
 	}
 }

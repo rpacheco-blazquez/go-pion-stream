@@ -1,16 +1,51 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="UTF-8">
-    <title>MJPEG Stream Viewer</title>
-    <style>
-      body { background: #4f4f4f; color: #fff; text-align: center; }
-      img { border: 2px solid #fff; margin-top: 2em; }
-    </style>
-  </head>
-  <body>
-    <h2>MJPEG Stream</h2>
-    <img src="/watch" width="320" height="240" alt="MJPEG stream">
-    <div style="margin-top:1em; color:#aaa;">Si ves solo negro, aún no hay frames de cámara.<br>Cuando envíes vídeo, aparecerá aquí.</div>
-  </body>
+
+<head>
+  <meta charset="UTF-8">
+  <title>MJPEG Stream Viewer</title>
+  <style>
+    body {
+      background: #4f4f4f;
+      color: #fff;
+      text-align: center;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    img {
+      border: 2px solid #fff;
+      margin-top: 2em;
+      max-width: 95%;
+      /* se adapta al ancho de la ventana */
+      height: auto;
+      /* mantiene la proporción */
+      max-height: 80vh;
+      /* no ocupa más del 80% de la altura visible */
+    }
+
+    h2 {
+      margin-top: 1em;
+    }
+
+    .info {
+      margin-top: 1em;
+      color: #aaa;
+      max-width: 90%;
+    }
+  </style>
+</head>
+
+<body>
+  <h2>MJPEG Stream</h2>
+  <img src="/watch" alt="MJPEG stream">
+  <div class="info">
+    Si ves solo negro, aún no hay frames de cámara.<br>
+    Cuando envíes vídeo, aparecerá aquí.
+  </div>
+</body>
+
 </html>

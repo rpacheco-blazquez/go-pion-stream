@@ -6,9 +6,13 @@ import (
 	"go-pion-stream-1/internal/webrtc"
 	"log"
 	"os"
+	"io"
 )
 
+
 func main() {
+	log.SetOutput(io.Discard)
+	
 	cfg := config.Load()
 
 	// Abrir o truncar el archivo de log
