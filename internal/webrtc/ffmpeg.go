@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"time"
 )
 
 // RunFFmpegToMJPEG lanza ffmpeg para leer rtp-forwarder.sdp y emite una corriente
@@ -14,11 +15,11 @@ func RunFFmpegToMJPEG(onFrame func([]byte)) error {
 	log.Println("[FFmpeg] Lanzando ffmpeg en modo image2pipe -> MJPEG...")
 
 	// Flag para activar/desactivar logs de FFmpeg
-	logFFmpeg := true
+	logFFmpeg := false
 
 	cmd := exec.Command(
 		"ffmpeg",
-		"-loglevel", "debug", // comentado para no ralentizar por logging
+		// "-loglevel", "debug", // comentado para no ralentizar por logging
 		"-nostdin",
 		"-protocol_whitelist", "file,udp,rtp",
 		// "-re", // comentado para evitar buffering y delay
@@ -76,6 +77,10 @@ func RunFFmpegToMJPEG(onFrame func([]byte)) error {
 		jpegEOI := []byte{0xFF, 0xD9}
 		tmp := make([]byte, 32*1024)
 
+		// Controlar la frecuencia de los logs
+		lastLogTime := time.Now()
+		logInterval := 5 * time.Second
+
 		for {
 			n, rerr := stdout.Read(tmp)
 			if n > 0 {
@@ -107,7 +112,12 @@ func RunFFmpegToMJPEG(onFrame func([]byte)) error {
 					if onFrame != nil {
 						onFrame(frame)
 					}
-					log.Println("[FFmpeg] Frame generado y enviado al handler broadcastFrameToChannel.")
+
+					// Registrar log solo si ha pasado el intervalo
+					if time.Since(lastLogTime) >= logInterval {
+						log.Println("[FFmpeg] Frame generado y enviado al handler broadcastFrameToChannel.")
+						lastLogTime = time.Now()
+					}
 
 					buf = buf[end:]
 				}

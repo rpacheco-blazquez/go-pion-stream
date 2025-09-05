@@ -323,6 +323,15 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Código no proporcionado", http.StatusBadRequest)
 		return
 	}
+
+	// Verificar si el canal ya existe
+	if channelManager.ValidateChannel(code) {
+		log.Printf("[RegisterHandler] Canal ya existe: %s", code)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Registrar el canal si no existe
 	channelManager.RegisterChannel(code)
 	w.WriteHeader(http.StatusOK)
 	log.Printf("[RegisterHandler] Código registrado: %s", code)

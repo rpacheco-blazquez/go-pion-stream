@@ -8,13 +8,16 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 )
 
 var (
-	clients           = map[int]*mjpegClient{}
-	clientsMtx        sync.Mutex
-	channelClients    = make(map[string]map[int]*Client)
-	channelClientsMtx sync.Mutex
+	clients             = map[int]*mjpegClient{}
+	clientsMtx          sync.Mutex
+	channelClients      = make(map[string]map[int]*Client)
+	channelClientsMtx   sync.Mutex
+	lastFrameForChannel = make(map[string][]byte)
+	lastLogTime         = make(map[string]time.Time) // Map para rastrear el último tiempo de log por canal
 )
 
 type mjpegClient struct {
@@ -54,6 +57,13 @@ func watchHandler(w http.ResponseWriter, r *http.Request, code string) {
 	}
 	clientID := len(channelClients[code]) + 1
 	channelClients[code][clientID] = client
+	log.Printf("[WatchHandler] Cliente %d registrado en canal %s", clientID, code) // Log para verificar registro
+
+	// Enviar el último frame al nuevo cliente si existe
+	if lastFrame, ok := lastFrameForChannel[code]; ok {
+		log.Printf("[WatchHandler] Enviando último frame al cliente %d en canal %s", clientID, code)
+		client.ch <- lastFrame
+	}
 	channelClientsMtx.Unlock()
 
 	defer func() {
@@ -63,6 +73,7 @@ func watchHandler(w http.ResponseWriter, r *http.Request, code string) {
 			delete(channelClients, code)
 		}
 		channelClientsMtx.Unlock()
+		log.Printf("[WatchHandler] Cliente %d eliminado del canal %s", clientID, code) // Log para verificar eliminación
 	}()
 
 	log.Printf("[WatchHandler] Viewer conectado exitosamente al canal %s", code)
@@ -82,22 +93,32 @@ func watchHandler(w http.ResponseWriter, r *http.Request, code string) {
 }
 
 func broadcastFrameToChannel(frame []byte, channel string) {
-	log.Printf("[Broadcast] Enviando frame al canal %s", channel)
+	currentTime := time.Now()
 	channelClientsMtx.Lock()
-	defer channelClientsMtx.Unlock()
+	lastFrameForChannel[channel] = frame // Save the last frame for the channel
 	if clients, ok := channelClients[channel]; ok {
-		log.Printf("[Broadcast] Canal %s tiene %d clientes registrados", channel, len(clients))
+		if lastLog, exists := lastLogTime[channel]; !exists || currentTime.Sub(lastLog) > 5*time.Second {
+			log.Printf("[Broadcast] Canal %s tiene %d clientes registrados", channel, len(clients))
+			lastLogTime[channel] = currentTime
+		}
 		for id, c := range clients {
 			select {
 			case c.ch <- frame:
-				log.Printf("[Broadcast] Frame enviado al cliente %d en canal %s", id, channel)
+				// Enviar frame sin loggear cada cliente
 			default:
-				log.Printf("[Broadcast] Cliente %d lento en canal %s, descartando frame", id, channel)
+				if lastLog, exists := lastLogTime[channel]; !exists || currentTime.Sub(lastLog) > 5*time.Second {
+					log.Printf("[Broadcast] Cliente %d lento en canal %s, descartando frame", id, channel)
+					lastLogTime[channel] = currentTime
+				}
 			}
 		}
 	} else {
-		log.Printf("[Broadcast] Canal %s no tiene clientes registrados", channel)
+		if lastLog, exists := lastLogTime[channel]; !exists || currentTime.Sub(lastLog) > 5*time.Second {
+			log.Printf("[Broadcast] Canal %s no tiene clientes registrados", channel)
+			lastLogTime[channel] = currentTime
+		}
 	}
+	channelClientsMtx.Unlock()
 }
 
 type Client struct {

@@ -36,16 +36,109 @@
       color: #aaa;
       max-width: 90%;
     }
+
+    input {
+      padding: 0.5em;
+      font-size: 1em;
+      border: none;
+      border-radius: 4px;
+      margin-right: 0.5em;
+    }
+
+    button {
+      padding: 0.5em 1em;
+      font-size: 1em;
+      color: #fff;
+      background-color: #007bff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    #streamContainer,
+    #qrContainer {
+      display: none;
+    }
   </style>
 </head>
 
 <body>
   <h2>MJPEG Stream</h2>
-  <img src="/watch" alt="MJPEG stream">
+  <div>
+    <button id="showStream">Stream</button>
+    <button id="showQR">QR</button>
+  </div>
+  <div id="streamContainer">
+    <img id="streamImg" src="/watch" alt="MJPEG stream">
+  </div>
+  <div id="qrContainer">
+    <img id="qrImg" src="/static/QR.png" alt="QR Code">
+  </div>
   <div class="info">
+    Código del canal:
+    <input type="text" id="channelCode" value="" placeholder="Código del canal">
+    <button id="updateCode">Actualizar</button><br>
     Si ves solo negro, aún no hay frames de cámara.<br>
     Cuando envíes vídeo, aparecerá aquí.
   </div>
+
+  <script>
+    // Generar un código aleatorio
+    function generateRandomCode() {
+      return Math.random().toString(36).substring(2, 8).toUpperCase();
+    }
+
+    // Obtener el código del canal desde la URL o generar uno nuevo
+    const urlParams = new URLSearchParams(window.location.search);
+    let code = urlParams.get('code') || generateRandomCode();
+    const channelCodeInput = document.getElementById('channelCode');
+    channelCodeInput.value = code;
+
+    // Actualizar la URL cuando se cambie el código
+    document.getElementById('updateCode').onclick = () => {
+      const newCode = channelCodeInput.value.trim();
+      if (newCode) {
+        window.location.search = `?code=${encodeURIComponent(newCode)}`;
+      }
+    };
+
+    // Mostrar y ocultar contenedores
+    const streamContainer = document.getElementById('streamContainer');
+    const qrContainer = document.getElementById('qrContainer');
+    const streamImg = document.getElementById('streamImg');
+    const qrImg = document.getElementById('qrImg');
+
+    document.getElementById('showStream').onclick = () => {
+      streamContainer.style.display = 'block';
+      qrContainer.style.display = 'none';
+      streamImg.src = `/watch?code=${encodeURIComponent(code)}`;
+    };
+
+    document.getElementById('showQR').onclick = () => {
+      qrContainer.style.display = 'block';
+      streamContainer.style.display = 'none';
+    };
+
+    // Mostrar el QR inicialmente
+    qrContainer.style.display = 'block';
+
+    // Enviar el código al backend para registrarlo y mostrar el mensaje de respuesta
+    fetch(`/register?code=${encodeURIComponent(code)}`, {
+      method: 'POST',
+    }).then(response => {
+      const statusDiv = document.createElement('div');
+      statusDiv.style.marginTop = '1em';
+      statusDiv.style.color = response.ok ? 'green' : 'red';
+      statusDiv.textContent = response.ok
+        ? `Código ${code} registrado exitosamente.`
+        : `Error al registrar el código ${code}.`;
+      document.body.appendChild(statusDiv);
+    });
+  </script>
 </body>
 
 </html>
