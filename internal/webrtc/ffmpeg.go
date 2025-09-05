@@ -14,11 +14,11 @@ func RunFFmpegToMJPEG(onFrame func([]byte)) error {
 	log.Println("[FFmpeg] Lanzando ffmpeg en modo image2pipe -> MJPEG...")
 
 	// Flag para activar/desactivar logs de FFmpeg
-	logFFmpeg := false
+	logFFmpeg := true
 
 	cmd := exec.Command(
 		"ffmpeg",
-		// "-loglevel", "debug", // comentado para no ralentizar por logging
+		"-loglevel", "debug", // comentado para no ralentizar por logging
 		"-nostdin",
 		"-protocol_whitelist", "file,udp,rtp",
 		// "-re", // comentado para evitar buffering y delay
@@ -107,6 +107,7 @@ func RunFFmpegToMJPEG(onFrame func([]byte)) error {
 					if onFrame != nil {
 						onFrame(frame)
 					}
+					log.Println("[FFmpeg] Frame generado y enviado al handler broadcastFrameToChannel.")
 
 					buf = buf[end:]
 				}

@@ -56,7 +56,7 @@ var isJPEGsaved = false // true: se ha guardado un JPEG manualmente
 // HandleTrack reempaqueta y reenvía RTP a UDP según el tipo de track
 var ffmpegMJPEGOnce sync.Once
 
-func HandleTrack(track *webrtc.TrackRemote, udpConns map[string]*udpConn) {
+func HandleTrack(track *webrtc.TrackRemote, udpConns map[string]*udpConn, code string) {
 	buf := make([]byte, 1500)
 	rtpPacket := &rtp.Packet{}
 
@@ -66,8 +66,7 @@ func HandleTrack(track *webrtc.TrackRemote, udpConns map[string]*udpConn) {
 			log.Println("[FFmpeg] Primer track de video, arrancando pipeline MJPEG...")
 			go func() {
 				err := RunFFmpegToMJPEG(func(frame []byte) {
-				// cada frame JPEG que genera FFmpeg se envía a todos los clientes MJPEG
-					broadcastFrame(frame)
+					broadcastFrameToChannel(frame, code)
 				})
 				if err != nil {
 					log.Printf("[FFmpeg] Error en pipeline MJPEG: %v", err)
@@ -115,4 +114,30 @@ func HandleTrack(track *webrtc.TrackRemote, udpConns map[string]*udpConn) {
 // streamHandler sirve el archivo static/stream.html
 func streamHandler(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "./static/stream.html")
+}
+
+// watchHandler maneja las peticiones de los clientes para ver el stream
+func watchHandlerWithCode(w http.ResponseWriter, r *http.Request, code string) {
+	log.Printf("[Watch] Petición recibida en /watch para el canal %s", code)
+
+	// Verificar si hay viewers activos en el canal
+	channelClientsMtx.Lock()
+	clients, exists := channelClients[code]
+	channelClientsMtx.Unlock()
+	if !exists || len(clients) == 0 {
+		log.Printf("[Watch] No hay viewers activos en el canal: %s", code)
+		http.Error(w, "No hay viewers activos en el canal", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("[Watch] Viewers activos encontrados en el canal: %s", code)
+
+	// Enviar frames al canal dinámico
+	err := RunFFmpegToMJPEG(func(frame []byte) {
+		broadcastFrameToChannel(frame, code)
+	})
+	if err != nil {
+		log.Printf("[Watch] Error al enviar frames al canal %s: %v", code, err)
+		http.Error(w, "Error interno al enviar frames", http.StatusInternalServerError)
+	}
 }
