@@ -1,25 +1,53 @@
-2025/09/05 00:14:03 [LOG] Todos los logs se guardarán en webrtc_server.log
-2025/09/05 00:14:03 [Server] Iniciando configuración de rutas HTTP...
-2025/09/05 00:14:03 [Server] Escuchando en puerto 8080 (endpoints /watch, /stream, /streamui, /watchui)
-2025/09/05 00:14:18 [Signaling] Petición recibida en /stream
-2025/09/05 00:14:18 [Signaling] Oferta SDP recibida. Creando sesión WebRTC...
-2025/09/05 00:14:18 [WebRTC] Creando nueva sesión WebRTC...
-2025/09/05 00:14:18 [WebRTC] Registrando codecs...
-2025/09/05 00:14:18 [WebRTC] Configurando interceptores...
-2025/09/05 00:14:18 [WebRTC] Creando PeerConnection...
-2025/09/05 00:14:18 [WebRTC] PeerConnection creado correctamente.
-2025/09/05 00:14:18 [ICE] State: checking
-2025/09/05 00:14:18 [PeerConnection] State: connecting
-2025/09/05 00:14:18 [Signaling] Respondiendo con answer SDP.
-2025/09/05 00:14:18 [ICE] State: connected
-2025/09/05 00:14:18 [PeerConnection] State: connected
-2025/09/05 00:14:18 [WebRTC] Recibido nuevo track: kind=audio, ssrc=207990668, id={fb575c33-8c3e-4c86-8211-99bc94b9671d}
-2025/09/05 00:14:18 [WebRTC] Recibido nuevo track: kind=video, ssrc=2259304581, id={e9f6f2f5-30e8-4102-98a4-c9c65207fa8b}
-2025/09/05 00:14:18 [FFmpeg] Primer track de video, arrancando pipeline MJPEG...
-2025/09/05 00:14:18 [RTCP] PLI enviado (intento 1/5) ssrc=2259304581
-2025/09/05 00:14:18 [FFmpeg] Lanzando ffmpeg en modo image2pipe -> MJPEG...
-2025/09/05 00:14:18 [RTCP] PLI enviado (intento 2/5) ssrc=2259304581
-2025/09/05 00:14:19 [RTCP] PLI enviado (intento 3/5) ssrc=2259304581
-2025/09/05 00:14:20 [RTCP] PLI enviado (intento 4/5) ssrc=2259304581
-2025/09/05 00:14:22 [RTCP] PLI enviado (intento 5/5) ssrc=2259304581
-2025/09/05 00:14:27 [RTCP] Finalizados intentos de PLI para ssrc=2259304581 (max 5 intentos)
+2025/09/06 01:44:26 [LOG] Todos los logs se guardarán en webrtc_server.log
+2025/09/06 01:44:28 [ngrok] Respuesta JSON recibida: {"tunnels":[{"name":"command_line","ID":"d750c8592015d74dfa68691ebab5cb74","uri":"/api/tunnels/command_line","public_url":"https://ff8267e13abd.ngrok-free.app","proto":"https","config":{"addr":"http://localhost:8080","inspect":true},"metrics":{"conns":{"count":0,"gauge":0,"rate1":0,"rate5":0,"rate15":0,"p50":0,"p90":0,"p95":0,"p99":0},"http":{"count":0,"rate1":0,"rate5":0,"rate15":0,"p50":0,"p90":0,"p95":0,"p99":0}}}],"uri":"/api/tunnels"}
+2025/09/06 01:44:28 [ngrok] URL pública: https://ff8267e13abd.ngrok-free.app
+2025/09/06 01:44:28 [ngrok] Generando código QR para la URL: https://ff8267e13abd.ngrok-free.app/streamui
+2025/09/06 01:44:28 [QR] Código QR generado y guardado como static/QR.png
+2025/09/06 01:44:28 [Server] Iniciando configuración de rutas HTTP...
+2025/09/06 01:44:28 [Server] Escuchando en puerto 8080 (endpoints /watch, /stream, /streamui, /watchui)
+2025/09/06 01:44:39 [ChannelManager] Canal registrado: Rafa
+2025/09/06 01:44:39 [RegisterHandler] Código registrado: Rafa
+2025/09/06 01:44:43 [WatchHandler] Viewer intentando conectarse al canal Rafa
+2025/09/06 01:44:43 [WatchHandler] Cliente 1 registrado en canal Rafa
+2025/09/06 01:44:43 [WatchHandler] Viewer conectado exitosamente al canal Rafa
+2025/09/06 01:44:43 [WatchHandler] Enviando frames al viewer en canal Rafa
+2025/09/06 01:44:45 [Signaling] Petición recibida en /stream para el canal Rafa
+2025/09/06 01:44:45 [Signaling] Código de canal recibido: Rafa
+2025/09/06 01:44:45 [Signaling] Viewers activos encontrados en el canal: Rafa
+2025/09/06 01:44:45 [Signaling] Oferta SDP recibida. Creando sesión WebRTC...
+2025/09/06 01:44:45 [WebRTC] Creando nueva sesión WebRTC...
+2025/09/06 01:44:45 [WebRTC] Registrando codecs...
+2025/09/06 01:44:45 [WebRTC] Configurando interceptores...
+2025/09/06 01:44:45 [WebRTC] Creando PeerConnection...
+2025/09/06 01:44:45 [ICE] State: checking
+2025/09/06 01:44:45 [PeerConnection] State: connecting
+2025/09/06 01:44:45 [Signaling] Respondiendo con answer SDP.
+2025/09/06 01:44:46 [ICE] State: connected
+2025/09/06 01:44:46 [PeerConnection] State: connected
+2025/09/06 01:44:46 [WebRTC] Recibido nuevo track: kind=audio, ssrc=4131787277, id={e975c20e-0d24-4621-b154-143e572bd2b1}
+2025/09/06 01:44:46 [WebRTC] Recibido nuevo track: kind=video, ssrc=1069645640, id={f6740f8d-9235-4e43-9cc4-0db20c33d56f}
+2025/09/06 01:44:46 [FFmpeg] Primer track de video, arrancando pipeline MJPEG...
+2025/09/06 01:44:46 [FFmpeg] Lanzando ffmpeg en modo image2pipe -> MJPEG...
+2025/09/06 01:44:46 [RTCP] PLI enviado (intento 1/5) ssrc=1069645640
+2025/09/06 01:44:46 [RTCP] PLI enviado (intento 2/5) ssrc=1069645640
+2025/09/06 01:44:47 [RTCP] PLI enviado (intento 3/5) ssrc=1069645640
+2025/09/06 01:44:48 [RTCP] PLI enviado (intento 4/5) ssrc=1069645640
+2025/09/06 01:44:49 [Broadcast] Canal Rafa tiene 1 clientes registrados
+2025/09/06 01:44:50 [RTCP] PLI enviado (intento 5/5) ssrc=1069645640
+2025/09/06 01:44:52 [FFmpeg] Frame generado y enviado al handler broadcastFrameToChannel.
+2025/09/06 01:44:54 [Broadcast] Canal Rafa tiene 1 clientes registrados
+2025/09/06 01:44:55 [RTCP] Finalizados intentos de PLI para ssrc=1069645640 (max 5 intentos)
+2025/09/06 01:44:57 [FFmpeg] Frame generado y enviado al handler broadcastFrameToChannel.
+2025/09/06 01:44:59 [Broadcast] Canal Rafa tiene 1 clientes registrados
+2025/09/06 01:45:02 [FFmpeg] Frame generado y enviado al handler broadcastFrameToChannel.
+2025/09/06 01:45:04 [Broadcast] Canal Rafa tiene 1 clientes registrados
+2025/09/06 01:45:07 [FFmpeg] Frame generado y enviado al handler broadcastFrameToChannel.
+2025/09/06 01:45:09 [Broadcast] Canal Rafa tiene 1 clientes registrados
+2025/09/06 01:45:12 [FFmpeg] Frame generado y enviado al handler broadcastFrameToChannel.
+2025/09/06 01:45:14 [Broadcast] Canal Rafa tiene 1 clientes registrados
+2025/09/06 01:45:17 [FFmpeg] Frame generado y enviado al handler broadcastFrameToChannel.
+2025/09/06 01:45:19 [Broadcast] Canal Rafa tiene 1 clientes registrados
+2025/09/06 01:45:22 [FFmpeg] Frame generado y enviado al handler broadcastFrameToChannel.
+2025/09/06 01:45:24 [Broadcast] Canal Rafa tiene 1 clientes registrados
+2025/09/06 01:45:26 [Server] Señal de interrupción recibida, limpiando recursos...
+2025/09/06 01:45:26 [QR] Archivo QR eliminado correctamente

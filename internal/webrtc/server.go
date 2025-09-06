@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rpacheco-blazquez/go-pion-stream/pkg/stream/relay"
+
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/intervalpli"
 	"github.com/pion/rtcp"
@@ -25,6 +27,9 @@ type ChannelManager struct {
 var channelManager = ChannelManager{
 	channels: make(map[string]bool),
 }
+
+// Global instance of ConnectionManager
+var connectionManager = relay.NewConnectionManager()
 
 func (cm *ChannelManager) RegisterChannel(code string) {
 	cm.mu.Lock()
@@ -46,7 +51,7 @@ func watchUIHandler(w http.ResponseWriter, r *http.Request) {
 	if code == "" {
 		code = generateRandomCode()
 	}
-	channelManager.RegisterChannel(code)
+	connectionManager.CreateChannel(code)
 
 	http.ServeFile(w, r, "./static/watch.html")
 }
@@ -297,7 +302,7 @@ func sendInitialPLIs(pc *webrtc.PeerConnection, mediaSSRC uint32, maxRetries int
 // Validar el código en el handler de /stream
 func validateStreamHandler(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
-	if !channelManager.ValidateChannel(code) {
+	if !ConnectionManager.ValidateChannel(code) {
 		log.Printf("[Signaling] Código de canal inválido: %s", code)
 		http.Error(w, "Código de canal inválido", http.StatusBadRequest)
 		return
