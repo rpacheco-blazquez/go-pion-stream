@@ -7,10 +7,9 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
-	"github.com/rpacheco-blazquez/go-pion-stream/pkg/stream/relay"
+	"github.com/rpacheco-blazquez/go-pion-stream/pkg/relay"
 
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/intervalpli"
@@ -18,40 +17,12 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// Estructura para gestionar los códigos de canal
-type ChannelManager struct {
-	mu       sync.Mutex
-	channels map[string]bool
-}
-
-var channelManager = ChannelManager{
-	channels: make(map[string]bool),
-}
-
 // Global instance of ConnectionManager
 var connectionManager = relay.NewConnectionManager()
 
-func (cm *ChannelManager) RegisterChannel(code string) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-	cm.channels[code] = true
-	log.Printf("[ChannelManager] Canal registrado: %s", code)
-}
-
-func (cm *ChannelManager) ValidateChannel(code string) bool {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-	_, exists := cm.channels[code]
-	return exists
-}
-
 // watchUIHandler sirve el visor MJPEG HTML
 func watchUIHandler(w http.ResponseWriter, r *http.Request) {
-	code := r.URL.Query().Get("code")
-	if code == "" {
-		code = generateRandomCode()
-	}
-	connectionManager.CreateChannel(code)
+	log.Printf("[watchUIHandler] Sirviendo watch.html")
 
 	http.ServeFile(w, r, "./static/watch.html")
 }
@@ -61,16 +32,39 @@ func generateRandomCode() string {
 	return fmt.Sprintf("%06X", rand.Intn(0xFFFFFF))
 }
 
+// Function to generate client IDs based on the length of all clients
+func generateClientID() int {
+	return len(connectionManager.ListAllClients()) + 1
+}
+
 // StartWebRTCServer inicia el servidor HTTP y configura las rutas principales
 func StartWebRTCServer(port int) {
 	log.Println("[Server] Iniciando configuración de rutas HTTP...")
 	// Actualizar las rutas para manejar códigos de canal
 	http.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
 		code := r.URL.Query().Get("code")
-		if code == "" {
-			http.Error(w, "Código de canal requerido", http.StatusBadRequest)
+		log.Println("[/stream] Solicitud recibida para canal:", code)
+
+		_, valid := connectionManager.ValidateChannel(code)
+		if !valid {
+			log.Println("[/stream] Canal no válido:", code)
+			http.Error(w, "Canal no válido", http.StatusBadRequest)
 			return
 		}
+		log.Println("[/stream] Canal validado:", code)
+
+		clientIDParam := r.URL.Query().Get("clientID")
+		if clientIDParam != "" {
+			clientID, err := strconv.Atoi(clientIDParam)
+			if err != nil {
+				log.Println("[/stream] clientID inválido:", clientIDParam)
+				http.Error(w, "clientID inválido", http.StatusBadRequest)
+				return
+			}
+			log.Println("[/stream] clientID recibido:", clientID)
+		}
+
+		log.Println("[/stream] Llamando a CreateWebRTCSession para canal:", code)
 		handleWebRTCStream(w, r, code)
 	})
 
@@ -80,7 +74,20 @@ func StartWebRTCServer(port int) {
 			http.Error(w, "Código de canal requerido", http.StatusBadRequest)
 			return
 		}
-		watchHandler(w, r, code)
+
+		clientIDParam := r.URL.Query().Get("clientID")
+		var clientID int
+		var err error
+		if clientIDParam != "" {
+			clientID, err = strconv.Atoi(clientIDParam)
+			if err != nil {
+				http.Error(w, "clientID inválido", http.StatusBadRequest)
+				return
+			}
+		}
+
+		// Pasar code y clientID al watchHandler
+		watchHandler(w, r, code, clientID)
 	})
 
 	http.HandleFunc("/streamui", streamHandler) // servir HTML
@@ -96,8 +103,9 @@ func StartWebRTCServer(port int) {
 }
 
 // CreateWebRTCSession inicializa una sesión WebRTC, procesa la oferta y devuelve el answer
-func CreateWebRTCSession(offer SDPMessage, code string) (*webrtc.PeerConnection, *webrtc.SessionDescription, error) {
+func CreateWebRTCSession(offer SDPMessage, code string, streamID int) (*webrtc.PeerConnection, *webrtc.SessionDescription, error) {
 	log.Println("[WebRTC] Creando nueva sesión WebRTC...")
+	log.Println("[CreateWebRTCSession] Iniciando sesión WebRTC para canal:", code)
 
 	// 1. Inicializar MediaEngine y codecs
 	mediaEngine := &webrtc.MediaEngine{}
@@ -107,6 +115,7 @@ func CreateWebRTCSession(offer SDPMessage, code string) (*webrtc.PeerConnection,
 			MimeType: webrtc.MimeTypeVP8, ClockRate: 90000, Channels: 0, SDPFmtpLine: "", RTCPFeedback: nil,
 		},
 	}, webrtc.RTPCodecTypeVideo); err != nil {
+		log.Println("[CreateWebRTCSession] Error registrando codec:", err)
 		return nil, nil, err
 	}
 	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
@@ -114,8 +123,10 @@ func CreateWebRTCSession(offer SDPMessage, code string) (*webrtc.PeerConnection,
 			MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 0, SDPFmtpLine: "", RTCPFeedback: nil,
 		},
 	}, webrtc.RTPCodecTypeAudio); err != nil {
+		log.Println("[CreateWebRTCSession] Error registrando codec:", err)
 		return nil, nil, err
 	}
+	log.Println("[CreateWebRTCSession] Codec registrado correctamente")
 
 	// 2. InterceptorRegistry y PLI
 	interceptorRegistry := &interceptor.Registry{}
@@ -137,8 +148,10 @@ func CreateWebRTCSession(offer SDPMessage, code string) (*webrtc.PeerConnection,
 	}
 	peerConnection, err := api.NewPeerConnection(config)
 	if err != nil {
+		log.Println("[CreateWebRTCSession] Error creando PeerConnection:", err)
 		return nil, nil, err
 	}
+	log.Println("[CreateWebRTCSession] PeerConnection creado correctamente")
 
 	// 4. Transceivers
 	if _, err = peerConnection.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio); err != nil {
@@ -173,7 +186,7 @@ func CreateWebRTCSession(offer SDPMessage, code string) (*webrtc.PeerConnection,
 		log.Printf("[WebRTC] Recibido nuevo track: kind=%s, ssrc=%d, id=%s\n", track.Kind().String(), track.SSRC(), track.ID())
 
 		// Lanzamos un goroutine para reenviar los RTP
-		go HandleTrack(track, udpConns, code)
+		go HandleTrack(track, udpConns, code, streamID)
 
 		// Sólo pedir PLIs para video
 		if track.Kind() == webrtc.RTPCodecTypeVideo {
@@ -185,14 +198,22 @@ func CreateWebRTCSession(offer SDPMessage, code string) (*webrtc.PeerConnection,
 
 	// 7. Callbacks de estado
 	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
-		log.Printf("[ICE] State: %s", connectionState.String())
+		log.Printf("[ICE] Estado de conexión ICE: %s", connectionState.String())
 	})
 	peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		log.Printf("[PeerConnection] State: %s", state.String())
+		log.Printf("[PeerConnection] Estado de conexión: %s", state.String())
+		log.Printf("[OnConnectionStateChange] Estado de conexión: %s", state.String())
 		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
 			log.Println("[PeerConnection] Cerrando conexiones UDP")
 			for _, conn := range udpConns {
 				conn.conn.Close()
+			}
+
+			// Obtener el canal y detener el stream asociado
+			if channel, exists := connectionManager.ValidateChannel(code); exists {
+				if err := channel.StopStream(streamID); err != nil {
+					log.Printf("[PeerConnection] Error deteniendo el stream: %v", err)
+				}
 			}
 		}
 	})
@@ -218,6 +239,7 @@ func CreateWebRTCSession(offer SDPMessage, code string) (*webrtc.PeerConnection,
 	<-gatherComplete
 
 	// 10. Devolver PeerConnection y answer SDP
+	log.Printf("[CreateWebRTCSession] Configuración completada para streamID: %d en canal: %s", streamID, code)
 	return peerConnection, peerConnection.LocalDescription(), nil
 }
 
@@ -302,17 +324,16 @@ func sendInitialPLIs(pc *webrtc.PeerConnection, mediaSSRC uint32, maxRetries int
 // Validar el código en el handler de /stream
 func validateStreamHandler(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
-	if !ConnectionManager.ValidateChannel(code) {
+	channel, exists := connectionManager.ValidateChannel(code)
+	if !exists {
 		log.Printf("[Signaling] Código de canal inválido: %s", code)
 		http.Error(w, "Código de canal inválido", http.StatusBadRequest)
 		return
 	}
 
 	// Verificar si hay viewers activos en el canal
-	channelClientsMtx.Lock()
-	clients, exists := channelClients[code]
-	channelClientsMtx.Unlock()
-	if !exists || len(clients) == 0 {
+	clients := channel.ListClients()
+	if len(clients) == 0 {
 		log.Printf("[Signaling] No hay viewers activos en el canal: %s", code)
 		http.Error(w, "No hay viewers activos en el canal", http.StatusBadRequest)
 		return
@@ -329,15 +350,19 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verificar si el canal ya existe
-	if channelManager.ValidateChannel(code) {
-		log.Printf("[RegisterHandler] Canal ya existe: %s", code)
-		w.WriteHeader(http.StatusOK)
+	// Crear o validar el canal
+	connectionManager.CreateChannel(code)
+
+	// Añadir el cliente al canal
+	clientID := generateClientID()
+	client := connectionManager.AddClient(code, clientID)
+	if client == nil {
+		log.Printf("[RegisterHandler] Error al añadir cliente al canal %s", code)
+		http.Error(w, "Error al añadir cliente al canal", http.StatusInternalServerError)
 		return
 	}
 
-	// Registrar el canal si no existe
-	channelManager.RegisterChannel(code)
+	log.Printf("[RegisterHandler] Viewer conectado exitosamente al canal %s con clientID %d", code, clientID)
 	w.WriteHeader(http.StatusOK)
-	log.Printf("[RegisterHandler] Código registrado: %s", code)
+	w.Write([]byte(fmt.Sprintf("%d", clientID)))
 }

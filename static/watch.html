@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <title>MJPEG Stream Viewer</title>
+  <title>MJPEG Stream | client NA</title>
   <style>
     body {
       background: #4f4f4f;
@@ -20,11 +20,8 @@
       border: 2px solid #fff;
       margin-top: 2em;
       max-width: 95%;
-      /* se adapta al ancho de la ventana */
       height: auto;
-      /* mantiene la proporción */
       max-height: 80vh;
-      /* no ocupa más del 80% de la altura visible */
     }
 
     h2 {
@@ -55,33 +52,84 @@
       cursor: pointer;
     }
 
-    button:hover {
+    button:disabled {
+      background-color: #6c757d;
+      cursor: not-allowed;
+    }
+
+    button:hover:not(:disabled) {
       background-color: #0056b3;
     }
 
-    #streamContainer,
-    #qrContainer {
+    #qrModal {
       display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.8);
+      justify-content: center;
+      align-items: center;
+    }
+
+    #qrContent {
+      position: relative;
+      background: #fff;
+      padding: 1em;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    #qrContent img {
+      max-width: 100%;
+      height: auto;
+    }
+
+    #closeQR {
+      position: absolute;
+      top: 0.5em;
+      right: 0.5em;
+      background: transparent;
+      color: #000;
+      border: none;
+      font-size: 1.5em;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    #closeQR:hover {
+      color: #555;
+    }
+
+    .info-buttons {
+      display: flex;
+      align-items: center;
+      gap: 0.5em;
+      margin-top: 0.5em;
     }
   </style>
 </head>
 
 <body>
-  <h2>MJPEG Stream</h2>
-  <div>
-    <button id="showStream">Stream</button>
-    <button id="showQR">QR</button>
-  </div>
+  <h2 id="title">MJPEG Stream | client NA</h2>
   <div id="streamContainer">
-    <img id="streamImg" src="/watch" alt="MJPEG stream">
+    <img id="streamImg" src="" alt="MJPEG stream">
   </div>
-  <div id="qrContainer">
-    <img id="qrImg" src="/static/QR.png" alt="QR Code">
+  <div id="qrModal">
+    <div id="qrContent">
+      <button id="closeQR">X</button>
+      <img id="qrImg" src="/static/QR.png" alt="QR Code">
+    </div>
   </div>
   <div class="info">
     Código del canal:
     <input type="text" id="channelCode" value="" placeholder="Código del canal">
-    <button id="updateCode">Actualizar</button><br>
+    <div class="info-buttons">
+      <button id="registerCode" disabled>Registrar</button>
+      <button id="showQR">QR</button>
+    </div>
+    <br>
     Si ves solo negro, aún no hay frames de cámara.<br>
     Cuando envíes vídeo, aparecerá aquí.
   </div>
@@ -96,48 +144,70 @@
     const urlParams = new URLSearchParams(window.location.search);
     let code = urlParams.get('code') || generateRandomCode();
     const channelCodeInput = document.getElementById('channelCode');
-    channelCodeInput.value = code;
+    const registerButton = document.getElementById('registerCode');
+    const title = document.getElementById('title');
+    const streamImg = document.getElementById('streamImg');
 
-    // Actualizar la URL cuando se cambie el código
-    document.getElementById('updateCode').onclick = () => {
+    channelCodeInput.value = code;
+    let lastRegisteredCode = null; // Cambiado para permitir el registro inicial
+
+    // Habilitar el botón si el código cambia o si no se ha registrado aún
+    const updateRegisterButtonState = () => {
+      const newCode = channelCodeInput.value.trim();
+      registerButton.disabled = newCode === lastRegisteredCode;
+    };
+
+    channelCodeInput.addEventListener('input', updateRegisterButtonState);
+
+    // Llamar a la función para habilitar el botón al cargar la página
+    updateRegisterButtonState();
+
+    // Registrar el código
+    registerButton.onclick = () => {
       const newCode = channelCodeInput.value.trim();
       if (newCode) {
-        window.location.search = `?code=${encodeURIComponent(newCode)}`;
+        fetch(`/register?code=${encodeURIComponent(newCode)}`, {
+          method: 'POST',
+        }).then(response => response.text())
+          .then(clientID => {
+            const statusDiv = document.createElement('div');
+            statusDiv.style.marginTop = '1em';
+            if (clientID) {
+              statusDiv.style.color = 'green';
+              statusDiv.textContent = `Código ${newCode} registrado exitosamente.`;
+              title.textContent = `MJPEG Stream | client ${clientID}`;
+              lastRegisteredCode = newCode;
+              registerButton.disabled = true;
+
+              // Actualizar el src de la imagen del stream
+              streamImg.src = `/watch?code=${encodeURIComponent(newCode)}&clientID=${encodeURIComponent(clientID)}`;
+            } else {
+              statusDiv.style.color = 'red';
+              statusDiv.textContent = `El canal ${newCode} ya existe.`;
+            }
+            document.body.appendChild(statusDiv);
+          });
       }
     };
 
-    // Mostrar y ocultar contenedores
-    const streamContainer = document.getElementById('streamContainer');
-    const qrContainer = document.getElementById('qrContainer');
-    const streamImg = document.getElementById('streamImg');
-    const qrImg = document.getElementById('qrImg');
+    // Mostrar el modal QR
+    const qrModal = document.getElementById('qrModal');
+    const showQRButton = document.getElementById('showQR');
+    const closeQRButton = document.getElementById('closeQR');
 
-    document.getElementById('showStream').onclick = () => {
-      streamContainer.style.display = 'block';
-      qrContainer.style.display = 'none';
-      streamImg.src = `/watch?code=${encodeURIComponent(code)}`;
+    showQRButton.onclick = () => {
+      qrModal.style.display = 'flex';
     };
 
-    document.getElementById('showQR').onclick = () => {
-      qrContainer.style.display = 'block';
-      streamContainer.style.display = 'none';
+    closeQRButton.onclick = () => {
+      qrModal.style.display = 'none';
     };
 
-    // Mostrar el QR inicialmente
-    qrContainer.style.display = 'block';
-
-    // Enviar el código al backend para registrarlo y mostrar el mensaje de respuesta
-    fetch(`/register?code=${encodeURIComponent(code)}`, {
-      method: 'POST',
-    }).then(response => {
-      const statusDiv = document.createElement('div');
-      statusDiv.style.marginTop = '1em';
-      statusDiv.style.color = response.ok ? 'green' : 'red';
-      statusDiv.textContent = response.ok
-        ? `Código ${code} registrado exitosamente.`
-        : `Error al registrar el código ${code}.`;
-      document.body.appendChild(statusDiv);
-    });
+    qrModal.onclick = (event) => {
+      if (event.target === qrModal) {
+        qrModal.style.display = 'none';
+      }
+    };
   </script>
 </body>
 

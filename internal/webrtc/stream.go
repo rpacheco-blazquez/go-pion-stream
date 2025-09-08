@@ -2,7 +2,6 @@ package webrtc
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -26,37 +25,10 @@ type udpConn struct {
 	payloadType uint8
 }
 
-// InitUDPConns inicializa los sockets UDP para audio y video
-func InitUDPConns() (map[string]*udpConn, error) {
-	udpConns := map[string]*udpConn{
-		"audio": {port: 4000, payloadType: 111},
-		"video": {port: 4002, payloadType: 96},
-	}
-	laddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:")
-	if err != nil {
-		return nil, err
-	}
-	for _, conn := range udpConns {
-		raddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("127.0.0.1:%d", conn.port))
-		if err != nil {
-			return nil, err
-		}
-		conn.conn, err = net.DialUDP("udp", laddr, raddr)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return udpConns, nil
-}
-
-// Variable para alternar entre MJPEG en vivo y grabación WebM
-var FFMPEGWEBM = false  // true: graba WebM cada 5s, false: MJPEG en vivo
-var isJPEGsaved = false // true: se ha guardado un JPEG manualmente
-
 // HandleTrack reempaqueta y reenvía RTP a UDP según el tipo de track
 var ffmpegMJPEGOnce sync.Once
 
-func HandleTrack(track *webrtc.TrackRemote, udpConns map[string]*udpConn, code string) {
+func HandleTrack(track *webrtc.TrackRemote, udpConns map[string]*udpConn, code string, streamID int) {
 	buf := make([]byte, 1500)
 	rtpPacket := &rtp.Packet{}
 
@@ -65,11 +37,14 @@ func HandleTrack(track *webrtc.TrackRemote, udpConns map[string]*udpConn, code s
 		ffmpegMJPEGOnce.Do(func() {
 			log.Println("[FFmpeg] Primer track de video, arrancando pipeline MJPEG...")
 			go func() {
+				// log.Println("[HandleTrack] Llamando a RunFFmpegToMJPEG...")
 				err := RunFFmpegToMJPEG(func(frame []byte) {
-					broadcastFrameToChannel(frame, code)
+					// log.Printf("[HandleTrack] Frame recibido en callback para streamID: %d en canal: %s", streamID, code)
+					//connectionManager.BroadcastToStream(code, streamID, frame)
+					connectionManager.BroadcastToClient(code, frame)
 				})
 				if err != nil {
-					log.Printf("[FFmpeg] Error en pipeline MJPEG: %v", err)
+					log.Printf("[HandleTrack] Error al ejecutar RunFFmpegToMJPEG: %v", err)
 				}
 			}()
 		})
@@ -80,6 +55,9 @@ func HandleTrack(track *webrtc.TrackRemote, udpConns map[string]*udpConn, code s
 	if !ok {
 		return
 	}
+
+	logTicker := time.NewTicker(5 * time.Second)
+	defer logTicker.Stop()
 
 	for {
 		n, _, readErr := track.Read(buf)
@@ -108,36 +86,17 @@ func HandleTrack(track *webrtc.TrackRemote, udpConns map[string]*udpConn, code s
 			log.Printf("[OnTrack] Error escribiendo UDP: %v", writeErr)
 			return
 		}
+
+		select {
+		case <-logTicker.C:
+			log.Printf("[HandleTrack] Frame enviado al stream %d en el canal %s", streamID, code)
+			log.Printf("[HandleTrack] Procesando frame para streamID: %d en canal: %s", streamID, code)
+		default:
+		}
 	}
 }
 
 // streamHandler sirve el archivo static/stream.html
 func streamHandler(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "./static/stream.html")
-}
-
-// watchHandler maneja las peticiones de los clientes para ver el stream
-func watchHandlerWithCode(w http.ResponseWriter, r *http.Request, code string) {
-	log.Printf("[Watch] Petición recibida en /watch para el canal %s", code)
-
-	// Verificar si hay viewers activos en el canal
-	channelClientsMtx.Lock()
-	clients, exists := channelClients[code]
-	channelClientsMtx.Unlock()
-	if !exists || len(clients) == 0 {
-		log.Printf("[Watch] No hay viewers activos en el canal: %s", code)
-		http.Error(w, "No hay viewers activos en el canal", http.StatusBadRequest)
-		return
-	}
-
-	log.Printf("[Watch] Viewers activos encontrados en el canal: %s", code)
-
-	// Enviar frames al canal dinámico
-	err := RunFFmpegToMJPEG(func(frame []byte) {
-		broadcastFrameToChannel(frame, code)
-	})
-	if err != nil {
-		log.Printf("[Watch] Error al enviar frames al canal %s: %v", code, err)
-		http.Error(w, "Error interno al enviar frames", http.StatusInternalServerError)
-	}
 }

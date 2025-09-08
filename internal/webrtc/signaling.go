@@ -25,31 +25,61 @@ func handleWebRTCStream(w http.ResponseWriter, r *http.Request, code string) {
 
 	log.Printf("[Signaling] Código de canal recibido: %s", code)
 
-	// Verificar si hay viewers activos en el canal antes de procesar la oferta SDP
-	channelClientsMtx.Lock()
-	clients, exists := channelClients[code]
-	channelClientsMtx.Unlock()
-	if !exists || len(clients) == 0 {
-		log.Printf("[Signaling] No hay viewers activos en el canal: %s", code)
-		http.Error(w, "No hay viewers activos en el canal", http.StatusBadRequest)
+	// Validar el canal y verificar si hay viewers activos
+	channel, exists := connectionManager.ValidateChannel(code)
+	log.Printf("[Signaling] Validación de canal para %s: existe=%v", code, exists)
+	if !exists {
+		log.Printf("[Signaling] Canal no existe: %s", code)
+		http.Error(w, "Canal no encontrado", http.StatusBadRequest)
+		return
+	}
+
+	clients := connectionManager.ListClients(code)
+	log.Printf("[Signaling] Número de viewers obtenidos para el canal %s: %d", code, len(clients))
+
+	if len(clients) == 0 {
+		log.Printf("[Signaling] Ya no hay viewers activos en el canal: %s. El canal será eliminado.", code)
+		connectionManager.RemoveChannel(code) // Remove the channel if no viewers are active
+		http.Error(w, "Ya no hay viewers activos en el canal. El canal ha sido eliminado.", http.StatusBadRequest)
 		return
 	}
 
 	log.Printf("[Signaling] Viewers activos encontrados en el canal: %s", code)
 
 	log.Println("[Signaling] Oferta SDP recibida. Creando sesión WebRTC...")
+	// Obtener un streamID único
+	streamID := len(connectionManager.ListAllStreams()) + 1
+
+	// Crear el stream con el streamID generado
+	if _, err := channel.AttachStream(streamID); err != nil {
+		log.Println("[Signaling] Error creando el stream:", err)
+		http.Error(w, "Error interno creando el stream", http.StatusInternalServerError)
+		return
+	}
+
 	// Crear PeerConnection y procesar la oferta
-	peerConnection, answer, err := CreateWebRTCSession(offerMsg, code)
+	peerConnection, answer, err := CreateWebRTCSession(offerMsg, code, streamID)
 	if err != nil {
 		log.Println("[Signaling] Error creando sesión WebRTC:", err)
 		http.Error(w, "Error interno WebRTC", http.StatusInternalServerError)
 		return
 	}
 
-
 	// Asociar el PeerConnection al canal
-	CreateChannel(code, peerConnection)
+	if err := channel.AssociateStreamPeerConnection(streamID, peerConnection); err != nil {
+		log.Println("[Signaling] Error asociando PeerConnection al canal:", err)
+		http.Error(w, "Error interno asociando PeerConnection", http.StatusInternalServerError)
+		return
+	}
 
+	// Iniciar el stream a nivel de canal
+	log.Printf("[Signaling] Intentando iniciar el stream con streamID: %d", streamID)
+	err = channel.StartStream(streamID)
+	if err != nil {
+		log.Printf("[Signaling] Error iniciando el stream: %v", err)
+		http.Error(w, "Error interno iniciando el stream", http.StatusInternalServerError)
+		return
+	}
 
 	log.Println("[Signaling] Respondiendo con answer SDP.")
 	// Responder con el answer SDP

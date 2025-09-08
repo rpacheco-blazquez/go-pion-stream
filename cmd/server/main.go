@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"go-pion-stream-1/internal/config"
-	"go-pion-stream-1/internal/webrtc"
 	"io"
 	"log"
 	"net/http"
@@ -14,6 +12,9 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/rpacheco-blazquez/go-pion-stream/internal/config"
+	"github.com/rpacheco-blazquez/go-pion-stream/internal/webrtc"
 
 	"github.com/skip2/go-qrcode"
 )
@@ -77,7 +78,15 @@ func getNgrokPublicURLWithRetries(maxRetries int, delay time.Duration) string {
 }
 
 func main() {
-	log.SetOutput(io.Discard)
+	// Manejo global de panic para registrar cualquier error fatal
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[PANIC] %v", r)
+			fmt.Fprintf(os.Stderr, "[PANIC] %v\n", r)
+		}
+	}()
+
+	// log.SetOutput(io.Discard)
 
 	cfg := config.Load()
 
@@ -91,17 +100,46 @@ func main() {
 	fmt.Println("Go Pion Stream Server started on port", cfg.Port)
 	log.Println("[LOG] Todos los logs se guardarán en webrtc_server.log")
 
-	// Iniciar solo el servidor WebRTC
-	// Iniciar ngrok como un proceso paralelo
-	cmd := exec.Command(".\\ngrok.exe", "http", fmt.Sprintf("%d", cfg.Port))
-	// Usar un buffer para capturar la salida de ngrok
-	var ngrokOutput bytes.Buffer
-	cmd.Stdout = &ngrokOutput
-	cmd.Stderr = logFile
+	// Asegurar que los logs se escriban inmediatamente en el archivo
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	defer logFile.Sync() // Forzar escritura de logs al archivo al finalizar el programa
 
-	// Iniciar ngrok y capturar su salida
-	if err := cmd.Start(); err != nil {
-		log.Fatalf("Error al iniciar ngrok: %v", err)
+	// Verificar si se sobrescribe log.SetOutput en otros lugares
+	log.Println("[DEBUG] Configuración inicial de logs completada")
+
+	// Permitir omitir ngrok en modo debug usando variable de entorno GO_DEBUG=1
+	isDebug := os.Getenv("GO_DEBUG") == "1"
+	var cmd *exec.Cmd
+	if isDebug {
+		log.Printf("[ngrok] Modo debug detectado (GO_DEBUG=1), omitiendo ejecución de ngrok")
+	} else {
+		// Buscar ngrok.exe en el root del proyecto
+		ngrokPath := ""
+		files, err := os.ReadDir(".")
+		if err == nil {
+			for _, f := range files {
+				if !f.IsDir() && (f.Name() == "ngrok.exe" || f.Name() == "ngrok") {
+					ngrokPath = f.Name()
+					break
+				}
+			}
+		}
+		if ngrokPath == "" {
+			log.Printf("[ngrok] ngrok.exe no encontrado en el root del proyecto, omitiendo ejecución de ngrok")
+		} else {
+			log.Printf("[ngrok] Usando ejecutable: %s", ngrokPath)
+			cmd = exec.Command(".\\"+ngrokPath, "http", fmt.Sprintf("%d", cfg.Port))
+			// Usar un buffer para capturar la salida de ngrok
+			var ngrokOutput bytes.Buffer
+			cmd.Stdout = &ngrokOutput
+			cmd.Stderr = logFile
+
+			// Iniciar ngrok y capturar su salida
+			if err := cmd.Start(); err != nil {
+				log.Printf("Error al iniciar ngrok: %v", err)
+				cmd = nil // No detener el servidor si ngrok falla
+			}
+		}
 	}
 
 	// Agregar un delay antes de obtener la URL pública de ngrok
@@ -154,7 +192,9 @@ func main() {
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
 	// Iniciar el servidor WebRTC
+	log.Println("[DEBUG] Llamando a StartWebRTCServer...")
 	webrtc.StartWebRTCServer(cfg.Port)
+	log.Println("[DEBUG] StartWebRTCServer ha retornado")
 
 	// Esperar a que ngrok termine
 	if err := cmd.Wait(); err != nil {

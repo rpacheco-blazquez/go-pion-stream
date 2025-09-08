@@ -2,20 +2,28 @@ package relay
 
 import (
 	"fmt"
+	"sync"
+	"time"
 )
 
 // Client represents a viewer connected to a channel.
 type Client struct {
-	ID   int
-	Chan chan []byte
-	Done chan struct{}
+	ID        int
+	Chan      chan []byte
+	Done      chan struct{}
+	IP        string                 // Dirección IP del cliente
+	Connected time.Time              // Timestamp de conexión
+	LastFrame time.Time              // Timestamp del último frame enviado
+	LastLog   time.Time              // Timestamp del último log.Printf de envío/descartado
+	Mutex     sync.Mutex             // Para manejar concurrencia en campos adicionales
+	Metadata  map[string]interface{} // Información adicional (extensible)
 }
 
 // NewClient creates and initializes a new Client.
 func NewClient(id int) *Client {
 	return &Client{
 		ID:   id,
-		Chan: make(chan []byte, 1),
+		Chan: make(chan []byte, 5),
 		Done: make(chan struct{}),
 	}
 }

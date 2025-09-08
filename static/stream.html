@@ -143,6 +143,7 @@
             const channelCodeInput = document.getElementById('channelCode');
             const cameraSelect = document.getElementById('cameraSelect');
             let pc = null;
+            let currentStream = null;
 
             sendBtn.onclick = async () => {
                 const channelCode = channelCodeInput.value.trim();
@@ -154,22 +155,21 @@
                 sendBtn.disabled = true;
                 statusDiv.textContent = 'Solicitando cámara y micro...';
 
-                // Verificar compatibilidad con getUserMedia
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                     alert('Tu navegador no soporta acceso a la cámara. Por favor, usa un navegador actualizado.');
                     return;
                 }
 
-                // Obtener la opción seleccionada para la cámara
-                const facingMode = cameraSelect.value;
+                // Usar el deviceId seleccionado
+                const deviceId = cameraSelect.value;
 
-                // Solicitar permisos con la cámara seleccionada
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: facingMode },
+                        video: { deviceId: { exact: deviceId } },
                         audio: true
                     });
                     video.srcObject = stream;
+                    currentStream = stream;
                     statusDiv.textContent = 'Cámara y micro capturados. Iniciando WebRTC...';
 
                     pc = new RTCPeerConnection();
@@ -211,22 +211,22 @@
                 }
             };
 
-            // Función para cambiar dinámicamente entre cámaras y actualizar la transmisión
+            // Cambiar de cámara y actualizar la transmisión
             async function switchCamera() {
-                const facingMode = cameraSelect.value;
+                const deviceId = cameraSelect.value;
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({
-                        video: { deviceId: facingMode ? { exact: facingMode } : undefined },
+                        video: { deviceId: { exact: deviceId } },
                         audio: true
                     });
 
                     // Detener el flujo anterior
-                    if (video.srcObject) {
-                        video.srcObject.getTracks().forEach(track => track.stop());
+                    if (currentStream) {
+                        currentStream.getTracks().forEach(track => track.stop());
                     }
 
-                    // Asignar el nuevo flujo al video
                     video.srcObject = stream;
+                    currentStream = stream;
 
                     // Actualizar la conexión WebRTC con el nuevo flujo
                     if (pc) {
@@ -245,7 +245,7 @@
                 }
             }
 
-            // Función para listar cámaras disponibles
+            // Listar cámaras disponibles
             async function listAvailableCameras() {
                 try {
                     // Solicitar permisos de cámara para garantizar que se detecten los dispositivos
@@ -254,10 +254,8 @@
                     const devices = await navigator.mediaDevices.enumerateDevices();
                     const videoDevices = devices.filter(device => device.kind === 'videoinput');
 
-                    // Limpiar las opciones existentes
                     cameraSelect.innerHTML = '';
 
-                    // Agregar las cámaras detectadas al selector
                     videoDevices.forEach((device, index) => {
                         const option = document.createElement('option');
                         option.value = device.deviceId;
@@ -274,10 +272,7 @@
                 }
             }
 
-            // Llamar a la función para listar cámaras al cargar la página
             listAvailableCameras();
-
-            // Escuchar cambios en el selector de cámaras
             cameraSelect.addEventListener('change', switchCamera);
         </script>
     </div>
