@@ -2,6 +2,7 @@ package webrtc
 
 import (
 	"fmt"
+	"html/template"
 	"log"
 	"math/rand"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	cfg "github.com/rpacheco-blazquez/go-pion-stream/internal/config"
 	"github.com/rpacheco-blazquez/go-pion-stream/pkg/relay"
 
 	"github.com/pion/interceptor"
@@ -22,9 +24,12 @@ var connectionManager = relay.NewConnectionManager()
 
 // watchUIHandler sirve el visor MJPEG HTML
 func watchUIHandler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[watchUIHandler] Sirviendo watch.html")
-
 	http.ServeFile(w, r, "./static/watch.html")
+}
+
+// logUIHandler sirve el visor de logs HTML
+func logUIHandler(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "./static/log.html")
 }
 
 // Función para generar códigos aleatorios
@@ -39,32 +44,23 @@ func generateClientID() int {
 
 // StartWebRTCServer inicia el servidor HTTP y configura las rutas principales
 func StartWebRTCServer(port int) {
-	log.Println("[Server] Iniciando configuración de rutas HTTP...")
 	// Actualizar las rutas para manejar códigos de canal
 	http.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
 		code := r.URL.Query().Get("code")
-		log.Println("[/stream] Solicitud recibida para canal:", code)
-
 		_, valid := connectionManager.ValidateChannel(code)
 		if !valid {
-			log.Println("[/stream] Canal no válido:", code)
 			http.Error(w, "Canal no válido", http.StatusBadRequest)
 			return
 		}
-		log.Println("[/stream] Canal validado:", code)
-
 		clientIDParam := r.URL.Query().Get("clientID")
 		if clientIDParam != "" {
 			clientID, err := strconv.Atoi(clientIDParam)
 			if err != nil {
-				log.Println("[/stream] clientID inválido:", clientIDParam)
 				http.Error(w, "clientID inválido", http.StatusBadRequest)
 				return
 			}
-			log.Println("[/stream] clientID recibido:", clientID)
+			_ = clientID // Only parse, do not log
 		}
-
-		log.Println("[/stream] Llamando a CreateWebRTCSession para canal:", code)
 		handleWebRTCStream(w, r, code)
 	})
 
@@ -92,30 +88,48 @@ func StartWebRTCServer(port int) {
 
 	http.HandleFunc("/streamui", streamHandler) // servir HTML
 	http.HandleFunc("/watchui", watchUIHandler) // servir visor MJPEG
-	// http.HandleFunc("/", rootHandler)
+	http.HandleFunc("/log", logUIHandler)       // servir visor de logs
 
 	// Nuevo handler para registrar códigos
 	http.HandleFunc("/register", registerHandler)
+	http.HandleFunc("/webrtc_server.log", logFileHandler) // servir log por HTTP
 
-	log.Println("[Server] Escuchando en puerto", port, "(endpoints /watch, /stream, /streamui, /watchui)")
+	// Endpoint principal explicativo con enlaces (usa template)
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		tmpl, err := template.ParseFiles("static/index.tmpl")
+		if err != nil {
+			http.Error(w, "Error cargando plantilla", http.StatusInternalServerError)
+			log.Printf("[TEMPLATE] Error al cargar index.tmpl: %v", err)
+			return
+		}
+		data := struct {
+			NgrokURL string
+		}{
+			NgrokURL: cfg.GetNgrokPublicURL(),
+		}
+		if err := tmpl.Execute(w, data); err != nil {
+			http.Error(w, "Error procesando plantilla", http.StatusInternalServerError)
+			log.Printf("[TEMPLATE] Error al ejecutar index.tmpl: %v", err)
+		}
+	})
+
 	addr := ":" + strconv.Itoa(port)
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
+// logFileHandler sirve el archivo de log bruto
+func logFileHandler(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "webrtc_server.log")
+}
+
 // CreateWebRTCSession inicializa una sesión WebRTC, procesa la oferta y devuelve el answer
 func CreateWebRTCSession(offer SDPMessage, code string, streamID int) (*webrtc.PeerConnection, *webrtc.SessionDescription, error) {
-	log.Println("[WebRTC] Creando nueva sesión WebRTC...")
-	log.Println("[CreateWebRTCSession] Iniciando sesión WebRTC para canal:", code)
-
-	// 1. Inicializar MediaEngine y codecs
 	mediaEngine := &webrtc.MediaEngine{}
-	log.Println("[WebRTC] Registrando codecs...")
 	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType: webrtc.MimeTypeVP8, ClockRate: 90000, Channels: 0, SDPFmtpLine: "", RTCPFeedback: nil,
 		},
 	}, webrtc.RTPCodecTypeVideo); err != nil {
-		log.Println("[CreateWebRTCSession] Error registrando codec:", err)
 		return nil, nil, err
 	}
 	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
@@ -123,14 +137,9 @@ func CreateWebRTCSession(offer SDPMessage, code string, streamID int) (*webrtc.P
 			MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 0, SDPFmtpLine: "", RTCPFeedback: nil,
 		},
 	}, webrtc.RTPCodecTypeAudio); err != nil {
-		log.Println("[CreateWebRTCSession] Error registrando codec:", err)
 		return nil, nil, err
 	}
-	log.Println("[CreateWebRTCSession] Codec registrado correctamente")
-
-	// 2. InterceptorRegistry y PLI
 	interceptorRegistry := &interceptor.Registry{}
-	log.Println("[WebRTC] Configurando interceptores...")
 	intervalPliFactory, err := intervalpli.NewReceiverInterceptor()
 	if err != nil {
 		return nil, nil, err
@@ -139,39 +148,32 @@ func CreateWebRTCSession(offer SDPMessage, code string, streamID int) (*webrtc.P
 	if err = webrtc.RegisterDefaultInterceptors(mediaEngine, interceptorRegistry); err != nil {
 		return nil, nil, err
 	}
-
-	// 3. Crear API y PeerConnection
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithInterceptorRegistry(interceptorRegistry))
-	log.Println("[WebRTC] Creando PeerConnection...")
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{{URLs: []string{"stun:stun.l.google.com:19302"}}},
 	}
 	peerConnection, err := api.NewPeerConnection(config)
 	if err != nil {
-		log.Println("[CreateWebRTCSession] Error creando PeerConnection:", err)
 		return nil, nil, err
 	}
-	log.Println("[CreateWebRTCSession] PeerConnection creado correctamente")
-
-	// 4. Transceivers
 	if _, err = peerConnection.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio); err != nil {
 		return nil, nil, err
 	}
 	if _, err = peerConnection.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo); err != nil {
 		return nil, nil, err
 	}
-
-	// 5. Preparar UDP para reenviar RTP
 	udpConns := map[string]*udpConn{
 		"audio": {port: 4000, payloadType: 111},
 		"video": {port: 4002, payloadType: 96},
 	}
-	laddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:")
+	configVals := cfg.Load()
+	udpBindIP := configVals.UDPBindIP
+	laddr, err := net.ResolveUDPAddr("udp", udpBindIP+":")
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, conn := range udpConns {
-		raddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("127.0.0.1:%d", conn.port))
+		raddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", udpBindIP, conn.port))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -180,45 +182,25 @@ func CreateWebRTCSession(offer SDPMessage, code string, streamID int) (*webrtc.P
 			return nil, nil, err
 		}
 	}
-
-	// 6. OnTrack: reenviar RTP a UDP
 	peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		log.Printf("[WebRTC] Recibido nuevo track: kind=%s, ssrc=%d, id=%s\n", track.Kind().String(), track.SSRC(), track.ID())
-
-		// Lanzamos un goroutine para reenviar los RTP
 		go HandleTrack(track, udpConns, code, streamID)
-
-		// Sólo pedir PLIs para video
 		if track.Kind() == webrtc.RTPCodecTypeVideo {
 			go func(pc *webrtc.PeerConnection, ssrc uint32) {
 				sendInitialPLIs(pc, ssrc, 5, 300*time.Millisecond)
 			}(peerConnection, uint32(track.SSRC()))
 		}
 	})
-
-	// 7. Callbacks de estado
-	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
-		log.Printf("[ICE] Estado de conexión ICE: %s", connectionState.String())
-	})
+	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {})
 	peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		log.Printf("[PeerConnection] Estado de conexión: %s", state.String())
-		log.Printf("[OnConnectionStateChange] Estado de conexión: %s", state.String())
 		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
-			log.Println("[PeerConnection] Cerrando conexiones UDP")
 			for _, conn := range udpConns {
 				conn.conn.Close()
 			}
-
-			// Obtener el canal y detener el stream asociado
 			if channel, exists := connectionManager.ValidateChannel(code); exists {
-				if err := channel.StopStream(streamID); err != nil {
-					log.Printf("[PeerConnection] Error deteniendo el stream: %v", err)
-				}
+				_ = channel.StopStream(streamID)
 			}
 		}
 	})
-
-	// 8. Procesar la oferta SDP
 	remoteOffer := webrtc.SessionDescription{
 		Type: webrtc.SDPTypeOffer,
 		SDP:  offer.SDP,
@@ -226,8 +208,6 @@ func CreateWebRTCSession(offer SDPMessage, code string, streamID int) (*webrtc.P
 	if err = peerConnection.SetRemoteDescription(remoteOffer); err != nil {
 		return nil, nil, err
 	}
-
-	// 9. Crear answer
 	answer, err := peerConnection.CreateAnswer(nil)
 	if err != nil {
 		return nil, nil, err
@@ -237,18 +217,12 @@ func CreateWebRTCSession(offer SDPMessage, code string, streamID int) (*webrtc.P
 		return nil, nil, err
 	}
 	<-gatherComplete
-
-	// 10. Devolver PeerConnection y answer SDP
-	log.Printf("[CreateWebRTCSession] Configuración completada para streamID: %d en canal: %s", streamID, code)
 	return peerConnection, peerConnection.LocalDescription(), nil
 }
 
 // CreateWebRTCSessionWithPeerConnection inicializa una sesión WebRTC y devuelve el PeerConnection y el answer SDP
 func CreateWebRTCSessionWithPeerConnection(offer SDPMessage) (*webrtc.PeerConnection, *webrtc.SessionDescription, error) {
-	log.Println("[WebRTC] Creando nueva sesión WebRTC...")
-	// 1. Inicializar MediaEngine y codecs
 	mediaEngine := &webrtc.MediaEngine{}
-	log.Println("[WebRTC] Registrando codecs...")
 	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType: webrtc.MimeTypeVP8, ClockRate: 90000, Channels: 0, SDPFmtpLine: "", RTCPFeedback: nil,
@@ -263,10 +237,7 @@ func CreateWebRTCSessionWithPeerConnection(offer SDPMessage) (*webrtc.PeerConnec
 	}, webrtc.RTPCodecTypeAudio); err != nil {
 		return nil, nil, err
 	}
-
-	// 2. Crear API y PeerConnection
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
-	log.Println("[WebRTC] Creando PeerConnection...")
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{{URLs: []string{"stun:stun.l.google.com:19302"}}},
 	}
@@ -274,8 +245,6 @@ func CreateWebRTCSessionWithPeerConnection(offer SDPMessage) (*webrtc.PeerConnec
 	if err != nil {
 		return nil, nil, err
 	}
-
-	// 3. Procesar la oferta SDP
 	remoteOffer := webrtc.SessionDescription{
 		Type: webrtc.SDPTypeOffer,
 		SDP:  offer.SDP,
@@ -283,8 +252,6 @@ func CreateWebRTCSessionWithPeerConnection(offer SDPMessage) (*webrtc.PeerConnec
 	if err = peerConnection.SetRemoteDescription(remoteOffer); err != nil {
 		return nil, nil, err
 	}
-
-	// 4. Crear answer
 	answer, err := peerConnection.CreateAnswer(nil)
 	if err != nil {
 		return nil, nil, err
@@ -294,8 +261,6 @@ func CreateWebRTCSessionWithPeerConnection(offer SDPMessage) (*webrtc.PeerConnec
 		return nil, nil, err
 	}
 	<-gatherComplete
-
-	// 5. Devolver PeerConnection y answer SDP
 	return peerConnection, peerConnection.LocalDescription(), nil
 }
 

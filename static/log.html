@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Logs del Servidor WebRTC</title>
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            /* overflow: hidden; */
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #181c20;
+            color: #e0e0e0;
+        }
+
+        body {
+            box-sizing: border-box;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .log-container {
+            width: 100vw;
+            max-width: 100vw;
+            height: 100vh;
+            max-height: 100vh;
+            overflow-y: scroll;
+            overflow-x: auto;
+            background: #181c20;
+            scrollbar-color: #444 #23272b;
+            scrollbar-width: thin;
+        }
+
+        table {
+            width: 100%;
+            min-width: 600px;
+            border-collapse: collapse;
+            background: #23272b;
+            font-size: 1rem;
+            box-shadow: 0 2px 8px #000a;
+        }
+
+        /* Scrollbar para navegadores Webkit */
+        .log-container::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        .log-container::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 5px;
+        }
+
+        .log-container::-webkit-scrollbar-track {
+            background: #23272b;
+        }
+
+        thead {
+            position: sticky;
+            top: 0;
+            background: #23272b;
+            z-index: 2;
+        }
+
+        th,
+        td {
+            padding: 0.5em 1em;
+            border-bottom: 1px solid #333;
+            text-align: left;
+            white-space: pre-wrap;
+        }
+
+        th {
+            background: #23272b;
+            color: #ffb347;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            border-bottom: 2px solid #444;
+        }
+
+        tr:nth-child(even) td {
+            background: #202328;
+        }
+
+        tr:hover td {
+            background: #2a2e33;
+        }
+
+        .log-message {
+            color: #b3e5fc;
+            font-family: 'Fira Mono', 'Consolas', monospace;
+        }
+
+        .log-date {
+            color: #bdbdbd;
+        }
+
+        .log-time {
+            color: #90caf9;
+        }
+
+        .log-func {
+            color: #ffd54f;
+            font-weight: 500;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="log-container">
+        <table id="logTable">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Hora</th>
+                    <th>Función</th>
+                    <th>Mensaje</th>
+                </tr>
+            </thead>
+            <tbody id="logBody">
+                <!-- Aquí se insertarán las filas de log -->
+            </tbody>
+        </table>
+    </div>
+    <script>
+        // Autoscroll inteligente: solo baja si el usuario ya está abajo
+        const container = document.querySelector('.log-container');
+        let autoscroll = true;
+
+        // Detecta si el usuario está abajo del todo
+        function isScrolledToBottom() {
+            return container.scrollHeight - container.scrollTop - container.clientHeight < 5;
+        }
+
+        container.addEventListener('scroll', () => {
+            autoscroll = isScrolledToBottom();
+        });
+
+        async function loadLogs() {
+            const res = await fetch('/webrtc_server.log');
+            if (!res.ok) return;
+            const text = await res.text();
+            const lines = text.split('\n').filter(Boolean);
+            const tbody = document.getElementById('logBody');
+            tbody.innerHTML = '';
+            for (const line of lines) {
+                // Regex para: fecha/hora, funcion, mensaje
+                // Ejemplo: 2025/09/09 18:46:10 channel.go:100: [relay] Cliente desconectado: clientID=1 canal=RT3QLK
+                const match = line.match(/^(\d{4}\/\d{2}\/\d{2}) (\d{2}:\d{2}:\d{2}) ([^:]+:\d+): (.*)$/);
+                if (match) {
+                    const [, fecha, hora, funcion, mensaje] = match;
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `<td class="log-date">${fecha}</td><td class="log-time">${hora}</td><td class="log-func">${funcion}</td><td class="log-message">${mensaje}</td>`;
+                    tbody.appendChild(tr);
+                }
+            }
+            // Solo autoscroll si el usuario ya estaba abajo
+            if (autoscroll) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+        loadLogs();
+        setInterval(loadLogs, 2000);
+    </script>
+</body>
+
+</html>

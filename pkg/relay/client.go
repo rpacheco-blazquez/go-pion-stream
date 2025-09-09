@@ -2,6 +2,7 @@ package relay
 
 import (
 	"fmt"
+	"log"
 	"sync"
 	"time"
 )
@@ -20,10 +21,12 @@ type Client struct {
 }
 
 // NewClient creates and initializes a new Client.
+
 func NewClient(id int) *Client {
+	log.Printf("[relay] NewClient creado: clientID=%d", id)
 	return &Client{
 		ID:   id,
-		Chan: make(chan []byte, 5),
+		Chan: make(chan []byte, 1),
 		Done: make(chan struct{}),
 	}
 }

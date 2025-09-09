@@ -14,7 +14,7 @@
         html,
         body {
             height: 100%;
-            overflow: hidden;
+            overflow-y: auto;
             font-family: sans-serif;
         }
 
@@ -23,62 +23,131 @@
             flex-direction: column;
             justify-content: space-between;
             align-items: center;
-            height: 100%;
-            width: 100%;
             background-color: #f4f4f4;
+            overflow-y: auto;
         }
 
         .header {
-            flex: 0 0 5%;
+            height: 12vh;
+            min-height: 60px;
             padding: 1em;
             background-color: #007bff;
             color: #fff;
             width: 100%;
             text-align: center;
+            box-sizing: border-box;
+            justify-content: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .header h2 {
-            font-size: 2em;
+            font-size: 4em;
         }
 
         .video-container {
-            flex: 1 1 auto;
             display: flex;
             justify-content: center;
             align-items: center;
             width: 95%;
+            margin: 0 auto;
+            max-height: 60vh;
+            height: 60vh;
+            min-height: 180px;
+            box-sizing: border-box;
         }
 
         video {
-            width: 100%;
-            height: 80%;
+            width: 95%;
+            max-width: 95%;
+            height: 60vh;
+            max-height: 60vh;
             border: 2px solid #333;
+            background: #000;
+            display: block;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                max-height: 90vh;
+            }
+
+            .footer {
+                padding: 2.5em 0.2em 2.5em 0.2em;
+            }
+
+            button {
+                font-size: 2.7em;
+                padding: 1.5em 0;
+                width: 99vw;
+                min-width: 120px;
+                max-width: 100vw;
+                margin-top: 2em;
+            }
+
+            input,
+            select {
+                font-size: 3em !important;
+                padding: 1.5em !important;
+                max-width: 99vw !important;
+                margin-top: 1.2em !important;
+                height: auto !important;
+            }
+
+            label {
+                font-size: 1.7em;
+            }
+
+            .video-container {
+                max-height: 55vw;
+            }
+
+            video {
+                height: 45vw;
+                max-height: 55vw;
+                max-width: 99vw;
+            }
         }
 
         .footer {
             flex: 0 0 10%;
-            padding: 1em;
+            padding: 1.2em 0.5em 1.2em 0.5em;
             width: 100%;
             text-align: center;
+            height: 85vh;
         }
 
         button {
-            padding: 1.5em 0;
-            font-size: 3em;
+            padding: 1em 0;
+            font-size: 4em;
             background-color: #007bff;
             color: #fff;
             border: none;
-            border-radius: 15px;
+            border-radius: 10px;
             cursor: pointer;
-            width: 100%;
+            width: 95%;
+            min-width: 140px;
+            max-width: 95%;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            transition: transform 0.2s, box-shadow 0.2s;
+            transition: transform 0.2s, box-shadow 0.2s, background-color 0.2s;
+            margin: 1.2em auto 0 auto;
+            display: block;
         }
 
-        button:hover {
+        button:enabled:hover {
             background-color: #0056b3;
             transform: scale(1.05);
             box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        button:disabled {
+            background-color: #b0b0b0 !important;
+            color: #eee !important;
+            cursor: not-allowed !important;
+            box-shadow: none !important;
+            transform: none !important;
+            opacity: 0.7;
         }
 
         #status {
@@ -88,30 +157,63 @@
         }
 
         input {
-            padding: 0.5em;
-            font-size: 1.5em;
+            padding: 0.7em;
+            font-size: 4em;
             border: 2px solid #007bff;
             border-radius: 5px;
-            margin-top: 0.5em;
-            width: 100%;
-            max-width: 400px;
+            margin-top: 0.7em;
+            width: 95% !important;
+            min-width: 140px !important;
+            max-width: 95% !important;
+
+            text-transform: uppercase;
         }
 
         label {
-            font-size: 1.2em;
+            font-size: 4em;
             color: #333;
-            margin-top: 0.5em;
+            margin-top: 0.7em;
             display: block;
         }
 
         select {
-            padding: 0.5em;
-            font-size: 1.5em;
+            padding: 0.7em;
+            font-size: 4em;
             border: 2px solid #007bff;
             border-radius: 5px;
-            margin-top: 0.5em;
-            width: 100%;
-            max-width: 400px;
+            margin-top: 0.7em;
+            width: 95% !important;
+            min-width: 140px !important;
+            max-width: 95% !important;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                max-height: 90vh;
+            }
+
+            .footer {
+                padding: 1.5em 0.2em 1.5em 0.2em;
+            }
+
+            button {
+                font-size: 2.3em;
+                padding: 1.2em 0;
+                width: 98%;
+                min-width: 120px;
+                max-width: 100vw;
+            }
+
+            input,
+            select {
+                font-size: 1.7em;
+                padding: 1em;
+                max-width: 98vw;
+            }
+
+            label {
+                font-size: 1.4em;
+            }
         }
     </style>
 </head>
@@ -144,9 +246,24 @@
             const cameraSelect = document.getElementById('cameraSelect');
             let pc = null;
             let currentStream = null;
+            let lastSentConfig = { channel: '', camera: '' };
+
+            function cleanupConnection() {
+                // Cierra la conexión WebRTC y detiene los tracks
+                if (pc) {
+                    try { pc.close(); } catch (e) { }
+                    pc = null;
+                }
+                if (currentStream) {
+                    currentStream.getTracks().forEach(track => track.stop());
+                    currentStream = null;
+                }
+                video.srcObject = null;
+            }
 
             sendBtn.onclick = async () => {
                 const channelCode = channelCodeInput.value.trim();
+                const deviceId = cameraSelect.value;
                 if (!channelCode) {
                     alert('Por favor, introduce un código de canal.');
                     return;
@@ -155,13 +272,13 @@
                 sendBtn.disabled = true;
                 statusDiv.textContent = 'Solicitando cámara y micro...';
 
+                cleanupConnection(); // Siempre limpiar antes de crear uno nuevo
+
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                     alert('Tu navegador no soporta acceso a la cámara. Por favor, usa un navegador actualizado.');
+                    sendBtn.disabled = false;
                     return;
                 }
-
-                // Usar el deviceId seleccionado
-                const deviceId = cameraSelect.value;
 
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({
@@ -199,6 +316,10 @@
                     const answer = await resp.json();
                     await pc.setRemoteDescription(answer);
                     statusDiv.textContent = 'WebRTC conectado. Enviando cámara y micro.';
+
+                    // Guardar la última combinación enviada
+                    lastSentConfig = { channel: channelCode, camera: deviceId };
+                    updateSendBtnState();
                 } catch (err) {
                     if (err.name === 'NotAllowedError') {
                         alert('Permiso denegado para acceder a la cámara y el micrófono.');
@@ -211,38 +332,18 @@
                 }
             };
 
-            // Cambiar de cámara y actualizar la transmisión
-            async function switchCamera() {
+            // Al cambiar de cámara o canal, solo actualizar el estado del botón
+            function onCameraOrChannelChange() {
+                updateSendBtnState();
+                statusDiv.textContent = 'Cámara/canal cambiado. Pulsa Enviar para reconectar.';
+            }
+
+            // Habilita el botón solo si la combinación es diferente a la última enviada
+            function updateSendBtnState() {
+                const channelCode = channelCodeInput.value.trim();
                 const deviceId = cameraSelect.value;
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        video: { deviceId: { exact: deviceId } },
-                        audio: true
-                    });
-
-                    // Detener el flujo anterior
-                    if (currentStream) {
-                        currentStream.getTracks().forEach(track => track.stop());
-                    }
-
-                    video.srcObject = stream;
-                    currentStream = stream;
-
-                    // Actualizar la conexión WebRTC con el nuevo flujo
-                    if (pc) {
-                        // Remover los tracks antiguos
-                        pc.getSenders().forEach(sender => pc.removeTrack(sender));
-
-                        // Agregar los nuevos tracks
-                        stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-                        statusDiv.textContent = `Cámara cambiada y transmisión actualizada.`;
-                    } else {
-                        statusDiv.textContent = `Cámara cambiada, pero no hay conexión activa.`;
-                    }
-                } catch (err) {
-                    alert('Error al cambiar de cámara: ' + err.message);
-                }
+                const isDifferent = channelCode && (channelCode !== lastSentConfig.channel || deviceId !== lastSentConfig.camera);
+                sendBtn.disabled = !isDifferent;
             }
 
             // Listar cámaras disponibles
@@ -273,7 +374,17 @@
             }
 
             listAvailableCameras();
-            cameraSelect.addEventListener('change', switchCamera);
+            cameraSelect.addEventListener('change', onCameraOrChannelChange);
+            // Forzar mayúsculas en el input y actualizar estado
+            channelCodeInput.addEventListener('input', (e) => {
+                const start = channelCodeInput.selectionStart;
+                const end = channelCodeInput.selectionEnd;
+                channelCodeInput.value = channelCodeInput.value.toUpperCase();
+                channelCodeInput.setSelectionRange(start, end);
+                onCameraOrChannelChange();
+            });
+            // Inicializar el estado del botón al cargar
+            updateSendBtnState();
         </script>
     </div>
 </body>

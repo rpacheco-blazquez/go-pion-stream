@@ -146,17 +146,18 @@ func main() {
 	time.Sleep(2 * time.Second)
 
 	// Obtener y registrar la URL pública de ngrok después del delay
-	publicURL := getNgrokPublicURLWithRetries(5, 2*time.Second)
-	if publicURL != "" {
-		log.Printf("[ngrok] URL pública: %s", publicURL)
+
+	config.NgrokPublicURL = getNgrokPublicURLWithRetries(5, 2*time.Second)
+	if config.NgrokPublicURL != "" {
+		log.Printf("[ngrok] URL pública: %s", config.NgrokPublicURL)
 	} else {
 		log.Printf("[ngrok] No se pudo obtener la URL pública después de varios intentos")
 	}
 
 	// Cambiar la ruta de guardado del QR a static/QR.png
 	qrFilePath := "static/QR.png"
-	if publicURL != "" {
-		qrURL := publicURL + "/streamui"
+	if config.NgrokPublicURL != "" {
+		qrURL := config.NgrokPublicURL + "/streamui"
 		log.Printf("[ngrok] Generando código QR para la URL: %s", qrURL)
 		if err := qrcode.WriteFile(qrURL, qrcode.Medium, 256, qrFilePath); err != nil {
 			log.Printf("[QR] Error al generar el código QR: %v", err)

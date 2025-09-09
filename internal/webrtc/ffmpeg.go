@@ -2,22 +2,23 @@ package webrtc
 
 import (
 	"bytes"
-	"io"
+	"context"
 	"log"
 	"os"
 	"os/exec"
-	"time"
 )
 
 // RunFFmpegToMJPEG lanza ffmpeg para leer rtp-forwarder.sdp y emite una corriente
 // de JPEGs por stdout (image2pipe / mjpeg). Cada frame JPEG completo se pasa al callback onFrame.
 // Esto permite que MJPEG reciba frames incluso si no hay clientes aún.
-func RunFFmpegToMJPEG(onFrame func([]byte)) error {
-	log.Println("[FFmpeg] Lanzando ffmpeg en modo image2pipe -> MJPEG...")
-	log.Println("[RunFFmpegToMJPEG] Iniciando FFmpeg...")
-	defer log.Println("[RunFFmpegToMJPEG] FFmpeg finalizó.")
 
-	// Flag para activar/desactivar logs de FFmpeg
+// ...existing imports...
+
+// RunFFmpegToMJPEG lanza ffmpeg para leer rtp-forwarder.sdp y emite una corriente
+// de JPEGs por stdout (image2pipe / mjpeg). Cada frame JPEG completo se pasa al callback onFrame.
+// El contexto permite cancelar el proceso ffmpeg y la goroutine.
+func RunFFmpegToMJPEG(ctx context.Context, onFrame func([]byte)) error {
+	// Only log critical errors
 	logFFmpeg := false
 
 	cmd := exec.Command(
@@ -54,6 +55,12 @@ func RunFFmpegToMJPEG(onFrame func([]byte)) error {
 		return err
 	}
 
+	// Cancelar ffmpeg si el contexto se cancela
+	go func() {
+		<-ctx.Done()
+		_ = cmd.Process.Kill()
+	}()
+
 	// Leer stderr (logs de ffmpeg) solo si logFFmpeg está activado
 	go func() {
 		defer stderr.Close()
@@ -64,9 +71,6 @@ func RunFFmpegToMJPEG(onFrame func([]byte)) error {
 				log.Printf("[FFmpeg-STDERR] %s", bytes.TrimRight(buf[:n], "\r\n"))
 			}
 			if rerr != nil {
-				if rerr != io.EOF && logFFmpeg {
-					log.Printf("[FFmpeg-STDERR] Lectura stderr terminó con error: %v", rerr)
-				}
 				break
 			}
 		}
@@ -75,26 +79,19 @@ func RunFFmpegToMJPEG(onFrame func([]byte)) error {
 	// Leer stdout y extraer JPEGs completos
 	go func() {
 		defer stdout.Close()
-		buf := make([]byte, 0, 512*1024) // 512KB inicial
+		buf := make([]byte, 0, 512*1024)
 		jpegSOI := []byte{0xFF, 0xD8}
 		jpegEOI := []byte{0xFF, 0xD9}
 		tmp := make([]byte, 32*1024)
-
-		// Controlar la frecuencia de los logs
-		lastLogTime := time.Now()
-		logInterval := 5 * time.Second
-
 		for {
 			n, rerr := stdout.Read(tmp)
 			if n > 0 {
 				buf = append(buf, tmp[:n]...)
-
-				// Extraer todos los frames JPEG completos del buffer
 				for {
 					start := bytes.Index(buf, jpegSOI)
 					if start < 0 {
 						if len(buf) > 2*1024*1024 {
-							buf = buf[:0] // safety cap
+							buf = buf[:0]
 						}
 						break
 					}
@@ -110,44 +107,20 @@ func RunFFmpegToMJPEG(onFrame func([]byte)) error {
 					end := start + endRel + 2
 					frame := make([]byte, end-start)
 					copy(frame, buf[start:end])
-
-					// Llamar callback (broadcast o lo que quieras)
 					if onFrame != nil {
-						// log.Println("[RunFFmpegToMJPEG] Callback onFrame definido.")
 						onFrame(frame)
-						// log.Println("[RunFFmpegToMJPEG] Frame procesado y enviado al callback.")
 					}
-
-					// Registrar log solo si ha pasado el intervalo
-					if time.Since(lastLogTime) >= logInterval {
-						log.Println("[FFmpeg] Frame generado y enviado al handler broadcastFrameToChannel.")
-						lastLogTime = time.Now()
-					}
-
 					buf = buf[end:]
 				}
 			}
-
 			if rerr != nil {
-				if rerr != io.EOF && logFFmpeg {
-					log.Printf("[FFmpeg] Error leyendo stdout: %v", rerr)
-				}
 				break
 			}
-		}
-		if logFFmpeg {
-			log.Println("[FFmpeg] Finalizó lectura de stdout (ffmpeg terminado).")
 		}
 	}()
 
 	if err := cmd.Wait(); err != nil {
-		if logFFmpeg {
-			log.Printf("[FFmpeg] ffmpeg finalizó con error: %v", err)
-		}
 		return err
-	}
-	if logFFmpeg {
-		log.Println("[FFmpeg] ffmpeg finalizó correctamente.")
 	}
 	return nil
 }
@@ -156,10 +129,6 @@ func RunFFmpegToMJPEG(onFrame func([]byte)) error {
 // de JPEGs por stdout (image2pipe / mjpeg). Cada frame JPEG completo se pasa al callback onFrame.
 // Esto permite que MJPEG reciba frames incluso si no hay clientes aún.
 func RunFFmpegToMJPEGFile(onFrame func([]byte)) error {
-	log.Println("[FFmpeg] Lanzando ffmpeg en modo image2pipe -> MJPEG (a archivo output.mjpeg)...")
-	log.Println("[RunFFmpegToMJPEGFile] Iniciando FFmpeg...")
-	defer log.Println("[RunFFmpegToMJPEGFile] FFmpeg finalizó.")
-
 	logFFmpeg := false
 
 	cmd := exec.Command(
@@ -209,9 +178,6 @@ func RunFFmpegToMJPEGFile(onFrame func([]byte)) error {
 				log.Printf("[FFmpeg-STDERR] %s", bytes.TrimRight(buf[:n], "\r\n"))
 			}
 			if rerr != nil {
-				if rerr != io.EOF && logFFmpeg {
-					log.Printf("[FFmpeg-STDERR] Lectura stderr terminó con error: %v", rerr)
-				}
 				break
 			}
 		}
@@ -229,24 +195,12 @@ func RunFFmpegToMJPEGFile(onFrame func([]byte)) error {
 			}
 		}
 		if rerr != nil {
-			if rerr != io.EOF && logFFmpeg {
-				log.Printf("[FFmpeg] Error leyendo stdout: %v", rerr)
-			}
 			break
 		}
 	}
-	if logFFmpeg {
-		log.Println("[FFmpeg] Finalizó lectura de stdout (ffmpeg terminado).")
-	}
 
 	if err := cmd.Wait(); err != nil {
-		if logFFmpeg {
-			log.Printf("[FFmpeg] ffmpeg finalizó con error: %v", err)
-		}
 		return err
-	}
-	if logFFmpeg {
-		log.Println("[FFmpeg] ffmpeg finalizó correctamente.")
 	}
 	return nil
 }

@@ -3,96 +3,151 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>WebRTC Stream Sender</title>
+    <title>Inicio - Plataforma WebRTC</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body {
-            font-family: sans-serif;
-            margin: 2em;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #181c20;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
         }
 
-        video {
-            width: 320px;
-            border: 1px solid #888;
-            margin-bottom: 1em;
+        .container {
+            margin-top: 3em;
+            background: #23272b;
+            border-radius: 16px;
+            box-shadow: 0 4px 16px #000a;
+            padding: 2em 2em 2.5em 2em;
+            max-width: 480px;
+            width: 95vw;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
 
-        #status {
-            margin-top: 1em;
-            font-weight: bold;
+        h1 {
+            color: #ffb347;
+            margin-bottom: 0.5em;
         }
 
-        button {
-            padding: 0.5em 1em;
-            font-size: 1em;
+        p {
+            color: #bdbdbd;
+            margin-bottom: 2em;
+            text-align: center;
+        }
+
+        .btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 1.2em;
+            width: 100%;
+            margin-bottom: 2em;
+        }
+
+        .main-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.7em;
+            background: #007bff;
+            color: #fff;
+            font-size: 1.4em;
+            font-weight: 600;
+            border: none;
+            border-radius: 10px;
+            padding: 1em 0;
+            width: 100%;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.2s;
+            box-shadow: 0 2px 8px #0006;
+            text-decoration: none;
+        }
+
+        .main-btn:hover {
+            background: #0056b3;
+            transform: scale(1.04);
+        }
+
+        .main-btn svg {
+            width: 1.5em;
+            height: 1.5em;
+            vertical-align: middle;
+        }
+
+        .info {
+            margin-top: 2em;
+            color: #bdbdbd;
+            font-size: 1.1em;
+            text-align: left;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 1em 0.2em 1.5em 0.2em;
+                max-width: 99vw;
+            }
+
+            h1 {
+                font-size: 1.5em;
+            }
+
+            .main-btn {
+                font-size: 1.1em;
+                padding: 0.8em 0;
+            }
         }
     </style>
 </head>
 
 <body>
-    <h2>Enviar cámara y micro al backend WebRTC</h2>
-    <video id="localVideo" autoplay muted playsinline></video><br>
-    <button id="startBtn">Iniciar envío</button>
-    <div id="status">Esperando acción...</div>
-    <script>
-        const startBtn = document.getElementById('startBtn');
-        const statusDiv = document.getElementById('status');
-        const localVideo = document.getElementById('localVideo');
-        let pc;
-
-        startBtn.onclick = async () => {
-            startBtn.disabled = true;
-            statusDiv.textContent = 'Solicitando cámara y micro...';
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                localVideo.srcObject = stream;
-                statusDiv.textContent = 'Cámara y micro OK. Creando conexión...';
-                console.log('Tracks obtenidos:', stream.getTracks().map(t => t.kind + ':' + t.id));
-                pc = new RTCPeerConnection({
-                    iceServers: [
-                        { urls: "stun:stun.l.google.com:19302" }
-                    ]
-                });
-                pc.onicecandidate = (e) => {
-                    if (e.candidate) console.log('ICE candidate:', e.candidate.candidate);
-                    else console.log('ICE gathering complete');
-                };
-                pc.oniceconnectionstatechange = () => {
-                    statusDiv.textContent = 'ICE: ' + pc.iceConnectionState;
-                    console.log('ICE connection state:', pc.iceConnectionState);
-                };
-                pc.onconnectionstatechange = () => {
-                    console.log('PeerConnection state:', pc.connectionState);
-                };
-                pc.onnegotiationneeded = () => {
-                    console.log('Negotiation needed');
-                };
-                pc.ontrack = (e) => {
-                    console.log('ontrack (remoto) recibido:', e.track.kind, e.track.id);
-                };
-                stream.getTracks().forEach(track => {
-                    pc.addTrack(track, stream);
-                    console.log('Track añadido al PeerConnection:', track.kind, track.id);
-                });
-                statusDiv.textContent += '\nTracks añadidos: ' + stream.getTracks().map(t => t.kind).join(', ');
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                statusDiv.textContent = 'Enviando oferta al backend...';
-                const response = await fetch('/stream', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(pc.localDescription)
-                });
-                const answer = await response.json();
-                await pc.setRemoteDescription(answer);
-                statusDiv.textContent = '¡Enviando vídeo y audio al backend!';
-                console.log('Oferta enviada y respuesta recibida. Estado final:', pc.iceConnectionState);
-            } catch (e) {
-                statusDiv.textContent = 'Error: ' + e;
-                startBtn.disabled = false;
-                console.error(e);
-            }
-        };
-    </script>
+    <div class="container">
+        <h1>Plataforma WebRTC</h1>
+        <p>
+            <b>¿Cómo funciona?</b><br>
+            1. Abre <b>WatchUI</b> para crear una sala y obtener el código.<br>
+            2. Puedes escanear el QR con tu móvil para abrir la URL directamente.<br>
+            3. En <b>StreamUI</b> introduce el código generado para enviar tu cámara/micrófono.<br>
+            4. Usa <b>Log</b> para depurar y monitorizar todas las instancias.
+        </p>
+        <div class="btn-group">
+            <a href="/watchui" class="main-btn" title="Abrir WatchUI">
+                <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 8v4l3 3" />
+                </svg>
+                WatchUI (Ver sala)
+            </a>
+            <a href="/streamui" class="main-btn" title="Abrir StreamUI">
+                <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <rect x="3" y="7" width="18" height="13" rx="2" />
+                    <path d="M16 3v4" />
+                    <path d="M8 3v4" />
+                </svg>
+                StreamUI (Enviar cámara)
+            </a>
+            <a href="/log" class="main-btn" title="Ver Log">
+                <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <rect x="3" y="5" width="18" height="14" rx="2" />
+                    <path d="M8 9h8" />
+                    <path d="M8 13h6" />
+                </svg>
+                Log (Debug)
+            </a>
+        </div>
+        <div class="info">
+            <b>Notas:</b><br>
+            - <b>WatchUI</b>: Crea la sala y muestra el código y QR para compartir.<br>
+            - <b>StreamUI</b>: Introduce el código de la sala para enviar tu cámara/micrófono.<br>
+            - <b>Log</b>: Visualiza los logs del servidor en tiempo real.<br>
+        </div>
+    </div>
 </body>
 
 </html>

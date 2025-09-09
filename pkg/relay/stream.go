@@ -9,6 +9,7 @@ import (
 	"image/jpeg"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
@@ -37,6 +38,7 @@ func (s *Stream) Start() error {
 		return fmt.Errorf("stream %d is already running", s.ID)
 	}
 	s.Running = true
+	log.Printf("[relay] Stream iniciado: streamID=%d", s.ID)
 	return nil
 }
 
@@ -48,6 +50,7 @@ func (s *Stream) Stop() error {
 		return fmt.Errorf("stream %d is not running", s.ID)
 	}
 	s.Running = false
+	log.Printf("[relay] Stream detenido: streamID=%d", s.ID)
 	return nil
 }
 
@@ -131,33 +134,21 @@ func (ch *Channel) StartStream(streamID int) error {
 		ch.Mutex.Unlock()
 		return fmt.Errorf("stream with ID %d does not exist in the channel", streamID)
 	}
-
-	// Use the Start method of Stream to enable running
 	if err := stream.Start(); err != nil {
 		ch.Mutex.Unlock()
 		return fmt.Errorf("failed to start stream %d: %w", streamID, err)
 	}
-
-	log.Printf("[Channel] Starting stream %d for channel", streamID) // Log the stream start
-
-	// Unlock the channel mutex before calling ListClients to avoid double locking
 	ch.Mutex.Unlock()
-
 	clients := ch.ListClients()
-
-	// Enviar el frame inicial una sola vez a cada cliente
 	stream.Mutex.Lock()
 	frame := stream.Data
 	stream.Mutex.Unlock()
 	for _, client := range clients {
 		select {
 		case client.Chan <- frame:
-			log.Printf("[Channel] Client %d sent initial data. Current stream data: %v", client.ID, frame)
 		default:
-			log.Printf("[Channel] Client %d is not receiving initial data. Current stream data: %v", client.ID, frame)
 		}
 	}
-
 	return nil
 }
 
@@ -169,34 +160,59 @@ func (ch *Channel) StopStream(streamID int) error {
 		ch.Mutex.Unlock()
 		return fmt.Errorf("stream with ID %d does not exist in the channel", streamID)
 	}
-
-	log.Printf("[Channel] Stopping stream %d for channel", streamID) // Log the stream stop
-
-	// Use the Stop method of Stream to disable running
 	if err := stream.Stop(); err != nil {
 		ch.Mutex.Unlock()
 		return fmt.Errorf("failed to stop stream %d: %w", streamID, err)
 	}
-
-	// Generate the "Stream Stopped" image
 	stoppedImage := generateStoppedStreamImage("Stream Stopped")
 	if stoppedImage == nil {
 		ch.Mutex.Unlock()
 		return fmt.Errorf("failed to generate stopped stream image")
 	}
-
 	ch.Mutex.Unlock()
-	// Redirect clients to the stopped image
 	clients := ch.ListClients()
-	for _, client := range clients {
-		select {
-		case client.Chan <- stoppedImage:
-		default:
-			log.Printf("[Channel] Client %d is not receiving data", client.ID)
+	go func(clients []*Client, stoppedImage []byte, ch *Channel) {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			<-ticker.C
+			ch.Mutex.Lock()
+			active := ch.ActiveStreamID
+			var running bool
+			if active != nil {
+				if stream, exists := ch.streamExist(*active); exists {
+					stream.Mutex.Lock()
+					running = stream.Running
+					stream.Mutex.Unlock()
+				}
+			}
+			ch.Mutex.Unlock()
+			if running {
+				return
+			}
+			for _, client := range clients {
+				for {
+					var empty = false
+					select {
+					case <-client.Chan:
+					default:
+						empty = true
+					}
+					if empty {
+						break
+					}
+				}
+				select {
+				case client.Chan <- stoppedImage:
+				default:
+				}
+			}
 		}
+	}(clients, stoppedImage, ch)
+	if err := ch.RemoveStream(streamID); err != nil {
+		// Only log critical error
+		log.Printf("[Channel] Error removing stream %d: %v", streamID, err)
 	}
-
-	log.Printf("[Channel] Stopped stream %d for channel", streamID)
 	return nil
 }
 
